@@ -233,6 +233,120 @@ class Sphere(Surface):
 
         return t, local_normal
 
+
+class Cylinder(Surface):
+    """
+    An infinite cylinder aligned along the local Z-axis.
+    Equation: x^2 + y^2 = R^2
+    """
+
+    def __init__(self, radius, transform=None, device='cpu'):
+        super().__init__(transform, device)
+        self.radius = torch.tensor(radius, dtype=torch.float32, device=device)
+
+    def _solve_t(self, local_pos, local_dir):
+        # Ray: P(t) = O + tD
+        # Substitute into x^2 + y^2 = R^2
+        # (Ox + tDx)^2 + (Oy + tDy)^2 = R^2
+        # Expand:
+        # (Dx^2 + Dy^2)t^2 + 2(OxDx + OyDy)t + (Ox^2 + Oy^2 - R^2) = 0
+        # A*t^2 + B*t + C = 0
+
+        ox, oy = local_pos[:, 0], local_pos[:, 1]
+        dx, dy = local_dir[:, 0], local_dir[:, 1]
+
+        A = dx ** 2 + dy ** 2
+        B = 2.0 * (ox * dx + oy * dy)
+        C = (ox ** 2 + oy ** 2) - self.radius ** 2
+
+        discriminant = B ** 2 - 4.0 * A * C
+
+        # Initialize t as infinity (miss)
+        t = torch.full_like(A, float('inf'))
+
+        # 1. Mask for valid hits (real roots)
+        hit_mask = discriminant >= 0
+
+        if hit_mask.any():
+            sqrt_delta = torch.sqrt(discriminant[hit_mask])
+            A_valid = A[hit_mask]
+            B_valid = B[hit_mask]
+
+            # Solve quadratic
+            t1 = (-B_valid - sqrt_delta) / (2.0 * A_valid)
+            t2 = (-B_valid + sqrt_delta) / (2.0 * A_valid)
+
+            # Selection Logic: Smallest POSITIVE t
+            epsilon = 1e-4
+
+            # Temporary holder for solutions on the masked subset
+            t_subset = torch.full_like(t1, float('inf'))
+
+            # Check t1
+            mask_t1 = t1 > epsilon
+            t_subset[mask_t1] = t1[mask_t1]
+
+            # Check t2 (if t1 invalid OR t2 better)
+            mask_t2 = (t2 > epsilon) & ((~mask_t1) | (t2 < t_subset))
+            t_subset[mask_t2] = t2[mask_t2]
+
+            t[hit_mask] = t_subset
+
+        return t
+
+    def _solve_geometric_properties(self, local_pos, local_dir):
+        # 1. Re-calculate A, B, C for gradients
+        ox, oy = local_pos[:, 0], local_pos[:, 1]
+        dx, dy = local_dir[:, 0], local_dir[:, 1]
+
+        A = dx ** 2 + dy ** 2
+        B = 2.0 * (ox * dx + oy * dy)
+        C = (ox ** 2 + oy ** 2) - self.radius ** 2
+
+        discriminant = B ** 2 - 4.0 * A * C
+
+        # Safe sqrt for gradients
+        delta_safe = torch.relu(discriminant)
+        sqrt_delta = torch.sqrt(delta_safe)
+
+        # 2. Re-calculate roots
+        # Add epsilon to A to avoid div/0 for rays perfectly parallel to Z-axis
+        A_safe = torch.where(A.abs() < 1e-8, torch.tensor(1e-8, device=self.device), A)
+
+        t1 = (-B - sqrt_delta) / (2.0 * A_safe)
+        t2 = (-B + sqrt_delta) / (2.0 * A_safe)
+
+        # 3. Selection Logic (Differentiable)
+        epsilon = 1e-4
+
+        # Default to inf
+        t_final = torch.full_like(t1, float('inf'))
+
+        # t1 valid?
+        mask_t1 = t1 > epsilon
+        t_final = torch.where(mask_t1, t1, t_final)
+
+        # t2 valid and better?
+        mask_t2 = (t2 > epsilon) & ((~mask_t1) | (t2 < t_final))
+        t_final = torch.where(mask_t2, t2, t_final)
+
+        # Mask out misses (discriminant < 0)
+        hit_mask = discriminant >= 0
+        t = torch.where(hit_mask, t_final, torch.full_like(t_final, float('inf')))
+
+        # 4. Local Normal
+        # For cylinder along Z: Normal is (x/R, y/R, 0)
+        # We need the hit point in local coordinates
+        hit_point = local_pos + t.unsqueeze(1) * local_dir
+
+        nx = hit_point[:, 0] / self.radius
+        ny = hit_point[:, 1] / self.radius
+        nz = torch.zeros_like(nx)
+
+        local_normal = torch.stack([nx, ny, nz], dim=1)
+
+        return t, local_normal
+
 class Quadric(Surface):
     """
     A General Quadric Surface (Conic Section of Revolution).
