@@ -10,7 +10,6 @@ class Rays:
         pos (Tensor): [N, 3] positions (x, y, z).
         dir (Tensor): [N, 3] normalized direction vectors.
         n (Tensor):   [N] refractive indices of the medium the rays are currently in.
-        active (Tensor): [N] boolean mask; True if ray is still propagating.
         wavelength (Tensor): [N] wavelengths (optional, for dispersion).
         intensity (Tensor): [N] intensity/energy of the ray.
     """
@@ -51,9 +50,6 @@ class Rays:
         # Initialize Metadata
         # Refractive index is tracked per ray
         self.n = torch.full((self.N,), n_medium, dtype=torch.float32, device=device)
-
-        # Active mask (True = propagating, False = vignetted/absorbed)
-        self.active = torch.ones(self.N, dtype=torch.bool, device=device)
 
         # Optical properties
         if wavelengths is not None:
@@ -123,7 +119,7 @@ class Rays:
         self.dir = F.normalize(new_dir, p=2, dim=1)
 
     def __repr__(self):
-        return f"<Rays N={self.N}, device={self.device}, active={self.active.sum()}>"
+        return f"<Rays N={self.N}, device={self.device}>"
 
     @staticmethod
     def merge(ray_list):
@@ -137,7 +133,6 @@ class Rays:
         all_pos = torch.cat([r.pos for r in ray_list], dim=0)
         all_dir = torch.cat([r.dir for r in ray_list], dim=0)
         all_n = torch.cat([r.n for r in ray_list], dim=0)
-        all_active = torch.cat([r.active for r in ray_list], dim=0)
         all_wave = torch.cat([r.wavelength for r in ray_list], dim=0)
         all_int = torch.cat([r.intensity for r in ray_list], dim=0)
         all_ids = torch.cat([r.id for r in ray_list], dim=0)
@@ -147,12 +142,36 @@ class Rays:
 
         # Overwrite with concatenated data
         merged.n = all_n
-        merged.active = all_active
         merged.wavelength = all_wave
         merged.intensity = all_int
         merged.id = all_ids
 
         return merged
+
+    def with_coords(self, new_pos, new_dir):
+        """
+        Returns a new Rays object with updated geometry but shared metadata.
+        Uses __new__ to skip initialization overhead.
+        """
+        # Create bare instance (skips __init__)
+        new_rays = Rays.__new__(Rays)
+
+        # Set new geometry
+        new_rays.device = self.device
+        new_rays.pos = new_pos
+
+        new_rays.N = new_pos.shape[0]
+
+        # Copy References to Metadata (No memory allocation)
+        new_rays.n = self.n
+        new_rays.intensity = self.intensity
+        new_rays.id = self.id
+
+        # Handle optional attributes
+        if hasattr(self, 'wavelength'):
+            new_rays.wavelength = self.wavelength
+
+        return new_rays
 
     def __repr__(self):
         unique_ids = self.id.unique().tolist()

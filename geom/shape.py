@@ -35,7 +35,7 @@ class Shape:
         Calculates intersection distances (t) for ALL contained surfaces.
 
         Args:
-            rays (Rays): Batch of N rays.
+            rays (Rays): Batch of N rays (Global Coordinates).
 
         Returns:
             t_matrix (Tensor): [N, K] where K is len(self.surfaces).
@@ -44,11 +44,17 @@ class Shape:
         if not self.surfaces:
             return torch.zeros((rays.N, 0), device=self.device)
 
+        # 1. Transform Global -> Local (Element Space)
+        local_pos, local_dir = self.transform.invTransform(rays)
+
+        # 2. Efficiently create local view (preserves metadata)
+        local_rays = rays.with_coords(local_pos, local_dir)
+
         t_list = []
         # Iterate over all surfaces in the shape
         for surf in self.surfaces:
             # Calls the detached/fast solver of the surface
-            t_val = surf.intersectTest(rays)
+            t_val = surf.intersectTest(local_rays)
             t_list.append(t_val)
 
         # Stack into a matrix [N, Number_of_Surfaces]
@@ -60,13 +66,29 @@ class Shape:
         Used after logic determines which surface was actually hit.
 
         Args:
-            rays (Rays): Batch of N rays.
+            rays (Rays): Batch of N rays (Global Coordinates).
             surf_idx (int): Index of the surface in self.surfaces.
 
         Returns:
-            t, hit_point, normal (Standard Surface.intersect output)
+            t, hit_point, normal (Standard Surface.intersect output in Global Frame)
         """
-        return self.surfaces[surf_idx].intersect(rays)
+        # 1. Transform Global -> Local (Element Space)
+        local_pos, local_dir = self.transform.invTransform(rays)
+        local_rays = rays.with_coords(local_pos, local_dir)
+
+        # 2. Call child intersection (Returns results in Element Frame)
+        t, elem_hit, elem_normal = self.surfaces[surf_idx].intersect(local_rays)
+
+        # 3. Transform Results back to Global Frame
+
+        # A. Hit Point: Recompute in global to ensure graph consistency
+        hit_point = rays.pos + t.unsqueeze(1) * rays.dir
+
+        # B. Normal: Transform Element -> Global
+        # Normals rotate with the element: N_global = N_local @ R.T
+        global_normal = elem_normal @ self.transform.rot.T
+
+        return t, hit_point, global_normal
 
     def inside(self, pos):
         """
