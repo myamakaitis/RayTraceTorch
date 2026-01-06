@@ -153,7 +153,7 @@ def test_lenses():
 
     # 6. Rectangular Box
     # Center=(0,0,0)
-    boxTransform = RayTransform(rotation=eulerToRotMat(torch.tensor([0, 0, torch.pi/2])))
+    boxTransform = RayTransform(rotation=eulerToRotMat(torch.tensor([0, 0, 0])))
 
     b1 = Box(center=torch.tensor([0., 0., 0.]),
              length = torch.tensor(10.0), height=torch.tensor(20.0), width=torch.tensor(30.0),

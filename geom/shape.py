@@ -45,7 +45,7 @@ class Shape:
             return torch.zeros((rays.N, 0), device=self.device)
 
         # 1. Transform Global -> Local (Element Space)
-        local_pos, local_dir = self.transform.Transform(rays)
+        local_pos, local_dir = self.transform.transform(rays)
         local_rays = rays.with_coords(local_pos, local_dir)
 
         t_list = []
@@ -88,7 +88,7 @@ class Shape:
             t, hit_point, normal (Standard Surface.intersect output in Global Frame)
         """
         # 1. Transform Global -> Local (Element Space)
-        local_pos, local_dir = self.transform.Transform(rays)
+        local_pos, local_dir = self.transform.transform(rays)
         local_rays = rays.with_coords(local_pos, local_dir)
 
         # 2. Call child intersection (Returns results in Element Frame)
@@ -111,7 +111,6 @@ class Shape:
         Must be implemented by children.
         """
         raise NotImplementedError
-
 
 
 class Box(Shape):

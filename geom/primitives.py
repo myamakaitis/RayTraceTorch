@@ -39,7 +39,7 @@ class Surface:
         """
 
         # 1. Transform Global -> Local
-        local_pos, local_dir = self.transform.invTransform(rays)
+        local_pos, local_dir = self.transform.transform(rays)
 
         # 2. Solve only for t
         t = self._solve_t(local_pos, local_dir)
@@ -58,7 +58,7 @@ class Surface:
             global_normal (Tensor): [N, 3] Surface normal at hit point (Global frame).
         """
         # 1. Transform Global -> Local
-        local_pos, local_dir = self.transform.Transform(rays)
+        local_pos, local_dir = self.transform.transform(rays)
 
         # 2. Solve for t and Local Normal (Differentiable)
         t, local_normal = self._solve_geometric_properties(local_pos, local_dir)
