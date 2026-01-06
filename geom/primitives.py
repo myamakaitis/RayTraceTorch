@@ -58,7 +58,7 @@ class Surface:
             global_normal (Tensor): [N, 3] Surface normal at hit point (Global frame).
         """
         # 1. Transform Global -> Local
-        local_pos, local_dir = self.transform.invTransform(rays)
+        local_pos, local_dir = self.transform.Transform(rays)
 
         # 2. Solve for t and Local Normal (Differentiable)
         t, local_normal = self._solve_geometric_properties(local_pos, local_dir)
@@ -70,7 +70,7 @@ class Surface:
         # 4. Transform Normal Local -> Global
         # Normals are direction vectors, so we apply the rotation.
         # Consistent with transform.py: D_global = D_local @ R.T
-        global_normal = local_normal @ self.transform.rot.T
+        global_normal = local_normal @ self.transform.rot
 
         return t, hit_point, global_normal
 

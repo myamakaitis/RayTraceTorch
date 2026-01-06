@@ -1,6 +1,6 @@
 import torch
 from .primitives import Plane
-from .transform import RayTransform
+from .transform import RayTransform, eulerToRotMat
 
 class Shape:
     """
@@ -45,7 +45,7 @@ class Shape:
             return torch.zeros((rays.N, 0), device=self.device)
 
         # 1. Transform Global -> Local (Element Space)
-        local_pos, local_dir = self.transform.invTransform(rays)
+        local_pos, local_dir = self.transform.Transform(rays)
         local_rays = rays.with_coords(local_pos, local_dir)
 
         t_list = []
@@ -88,7 +88,7 @@ class Shape:
             t, hit_point, normal (Standard Surface.intersect output in Global Frame)
         """
         # 1. Transform Global -> Local (Element Space)
-        local_pos, local_dir = self.transform.invTransform(rays)
+        local_pos, local_dir = self.transform.Transform(rays)
         local_rays = rays.with_coords(local_pos, local_dir)
 
         # 2. Call child intersection (Returns results in Element Frame)
@@ -101,7 +101,7 @@ class Shape:
 
         # B. Normal: Transform Element -> Global
         # Normals rotate with the element: N_global = N_local @ R.T
-        global_normal = elem_normal @ self.transform.rot.T
+        global_normal = elem_normal @ self.transform.rot
 
         return t, hit_point, global_normal
 
@@ -119,13 +119,15 @@ class Box(Shape):
     A rectangular prism defined by 6 Plane surfaces.
     """
 
-    def __init__(self, center, length, width, height, device='cpu'):
-        super().__init__(device)
+    def __init__(self, center, length, width, height, transform=None, device='cpu'):
+        super().__init__(transform=transform, device=device)
 
         self.center = center.to(device)
         self.length = length.to(device)
         self.width = width.to(device)
         self.height = height.to(device)
+
+        self.half_size = torch.tensor([self.width/2, self.height/2, self.length/2], device=self.device)
 
         # Automatically build the 6 boundary planes
         self._build_surfaces()
@@ -151,7 +153,6 @@ class Box(Shape):
            (OR we simply use this for constructive solid geometry).
         """
         cx, cy, cz = self.center
-        hx, hy, hz = self.half_size
 
         # Helper to create a plane with specific position and rotation
         def make_plane(pos, rot_angles):
@@ -166,8 +167,10 @@ class Box(Shape):
             # Assuming RayTransform(translation=..., rotation=...)
 
             # For simplicity, we define the 6 faces relative to Global.
+            Rmat = eulerToRotMat(torch.tensor(rot_angles)).squeeze()
+
             t = RayTransform(translation=torch.tensor(pos, device=self.device),
-                             rotation=torch.tensor(rot_angles, device=self.device))
+                             rotation=torch.tensor(Rmat, device=self.device))
             return Plane(transform=t, device=self.device)
 
         # 1. Front (+Z face)
@@ -176,20 +179,20 @@ class Box(Shape):
 
         # 2. Back (-Z face)
         # Rotate 180 Y so it faces -Z. Translate to -hz.
-        self.surfaces.append(make_plane([cx, cy, cz - self.length/2], [0.0, math.pi, 0.0]))
+        self.surfaces.append(make_plane([cx, cy, cz - self.length/2], [0.0, torch.pi, 0.0]))
 
         # 3. Right (+X face)
         # Rotate +90 Y. Normal (0,0,1) -> (1,0,0). Translate to +hx.
-        self.surfaces.append(make_plane([cx + self.width/2, cy, cz], [0.0, math.pi / 2, 0.0]))
+        self.surfaces.append(make_plane([cx + self.width/2, cy, cz], [0.0, torch.pi / 2, 0.0]))
 
         # 4. Left (-X face)
         # Rotate -90 Y. Normal (0,0,1) -> (-1,0,0). Translate to -hx.
-        self.surfaces.append(make_plane([cx - self.width/2, cy, cz], [0.0, -math.pi / 2, 0.0]))
+        self.surfaces.append(make_plane([cx - self.width/2, cy, cz], [0.0, -torch.pi / 2, 0.0]))
 
         # 5. Top (+Y face)
         # Rotate -90 X. Normal (0,0,1) -> (0,1,0). Translate to +hy.
-        self.surfaces.append(make_plane([cx, cy + self.height/2, cz], [-math.pi / 2, 0.0, 0.0]))
+        self.surfaces.append(make_plane([cx, cy + self.height/2, cz], [-torch.pi / 2, 0.0, 0.0]))
 
         # 6. Bottom (-Y face)
         # Rotate +90 X. Normal (0,0,1) -> (0,-1,0). Translate to -hy.
-        self.surfaces.append(make_plane([cx, cy - self.height/2, cz], [math.pi / 2, 0.0, 0.0]))
+        self.surfaces.append(make_plane([cx, cy - self.height/2, cz], [torch.pi / 2, 0.0, 0.0]))

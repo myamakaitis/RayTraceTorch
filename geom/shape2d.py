@@ -27,7 +27,7 @@ class Shape2D(Plane):
             global_normal (Tensor): [N, 3] Surface normal at hit point (Global frame).
         """
         # 1. Transform Global -> Local
-        local_pos, local_dir = self.transform.invTransform(rays)
+        local_pos, local_dir = self.transform.Transform(rays)
 
         # 2. Solve for t and Local Normal (Differentiable)
         t = self._solve_t(local_pos, local_dir)

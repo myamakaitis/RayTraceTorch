@@ -78,3 +78,73 @@ class RayTransform:
         self.rot = self.rot.to(device)
         self.trans = self.trans.to(device)
         return self
+
+def eulerToRotMat(euler_angles):
+    """
+    Converts a batch of Euler angles (roll, pitch, yaw) to rotation matrices
+    using the ZYX convention (extrinsic rotation: X, then Y, then Z).
+
+    Args:
+        euler_angles (torch.Tensor): Shape (..., 3) containing (roll, pitch, yaw)
+                                     in radians. Supports batch dimensions.
+
+    Returns:
+        torch.Tensor: Shape (..., 3, 3) rotation matrices.
+    """
+    # Extract the angles (supports arbitrary batch dimensions)
+    # theta_x = roll, theta_y = pitch, theta_z = yaw
+    theta_x = euler_angles[..., 0]
+    theta_y = euler_angles[..., 1]
+    theta_z = euler_angles[..., 2]
+
+    # Precompute sines and cosines
+    c_x = torch.cos(theta_x)
+    s_x = torch.sin(theta_x)
+    c_y = torch.cos(theta_y)
+    s_y = torch.sin(theta_y)
+    c_z = torch.cos(theta_z)
+    s_z = torch.sin(theta_z)
+
+    # Create a tensor of zeros/ones with the same shape/device as the angles
+    # This ensures we handle different devices (CPU/GPU) automatically
+    zeros = torch.zeros_like(theta_x)
+    ones = torch.ones_like(theta_x)
+
+    # Construct the Rotation Matrices
+
+    # Rotation Matrix for X-axis (Roll)
+    # [ 1   0    0  ]
+    # [ 0  c_x -s_x ]
+    # [ 0  s_x  c_x ]
+    R_x = torch.stack([
+        torch.stack([ones, zeros, zeros], dim=-1),
+        torch.stack([zeros, c_x, -s_x], dim=-1),
+        torch.stack([zeros, s_x, c_x], dim=-1)
+    ], dim=-2)
+
+    # Rotation Matrix for Y-axis (Pitch)
+    # [ c_y  0  s_y ]
+    # [  0   1   0  ]
+    # [-s_y  0  c_y ]
+    R_y = torch.stack([
+        torch.stack([c_y, zeros, s_y], dim=-1),
+        torch.stack([zeros, ones, zeros], dim=-1),
+        torch.stack([-s_y, zeros, c_y], dim=-1)
+    ], dim=-2)
+
+    # Rotation Matrix for Z-axis (Yaw)
+    # [ c_z -s_z  0 ]
+    # [ s_z  c_z  0 ]
+    # [  0    0   1 ]
+    R_z = torch.stack([
+        torch.stack([c_z, -s_z, zeros], dim=-1),
+        torch.stack([s_z, c_z, zeros], dim=-1),
+        torch.stack([zeros, zeros, ones], dim=-1)
+    ], dim=-2)
+
+    # Combine rotations: R = R_z @ R_y @ R_x
+    # This corresponds to rotating around X, then Y, then Z (in fixed frame)
+    # or Z, then Y, then X (in moving frame)
+    R = torch.matmul(R_z, torch.matmul(R_y, R_x))
+
+    return R

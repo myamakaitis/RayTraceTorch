@@ -159,6 +159,7 @@ class Rays:
         # Set new geometry
         new_rays.device = self.device
         new_rays.pos = new_pos
+        new_rays.dir = new_dir
 
         new_rays.N = new_pos.shape[0]
 
