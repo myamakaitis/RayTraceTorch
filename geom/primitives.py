@@ -27,7 +27,7 @@ class Surface:
         self.transform = self.transform.to(device)
         return self
 
-    def intersectTest(self, rays, elem_transform=None):
+    def intersectTest(self, rays):
         """
         Performs a lightweight intersection check to find distance t.
         Strictly NO GRADIENTS (detached).
@@ -37,9 +37,7 @@ class Surface:
         Returns:
             t (Tensor): [N] Distance to intersection.
         """
-        if elem_transform is not None:
 
-        else:
         # 1. Transform Global -> Local
         local_pos, local_dir = self.transform.invTransform(rays)
 
