@@ -1,7 +1,3 @@
-This completes the architectural blueprint. I have integrated your specific requirements: the `Inside()` method for volumetric/planar checks, the `Shape2D` class for apertures and mirrors, geometry validation logic, and the per-surface physics model for "inked" lens edges.
-
----
-
 # Project Blueprint: Differentiable 3D Ray Tracer (PyTorch)
 
 ## 1. Project Overview
@@ -15,7 +11,8 @@ This completes the architectural blueprint. I have integrated your specific requ
 ## 2. High-Level Architecture
 
 * **Entry Point:** `src/__init__.py`
-* **Data Flow:** 1.  User defines `Rays` or `Bundles`.
+* **Data Flow:** 
+1.  User defines `Rays` or `Bundles`.
 2.  User assembles a `Scene` or `OpticalSystem` containing `Elements`.
 3.  The `Scene` iterates through ray-surface interactions.
 4.  PyTorch tracks gradients from the "Loss" (e.g., spot size) back to `Element` parameters (e.g., curvature, position).
@@ -30,29 +27,31 @@ Defines the spatial boundaries and intersection math.
 
 * **`transform.py`**: Helper functions for 4x4 matrix operations. Maps Global  Local coordinates using differentiable PyTorch tensors.
 * **`primitives.py`**:
-* **Class `Surface**`: Parent class.
-* **Methods**:
-* `IntersectTest(ray)`: Returns distance .
-* `Intersect(ray)`: Returns  and Local Normal .
-
-
-* **Children**: `Plane`, `Cylinder`, `Sphere`, `Quadric`, `Hyperbola`.
+* **Class `Surface`**: Abstract Base Class.
+    * **Protocol**:
+        * `intersectTest(rays)`: **Fast, detached.** Returns distance $t$ (or matrix of $t$) for validity checks.
+        * `intersect(rays)`: **Differentiable, detailed.** Returns $t$, `hit_point` (Global), and `normal` (Global).
+    * **Implemented Children**:
+        * `Plane`: Infinite flat surface.
+        * `Sphere`: Standard curvature-based surface.
+        * `Quadric`: General conic section of revolution (Spheres, Parabolas, Ellipses, Hyperbolas).
+        * `Cylinder`: Infinite cylinder (for lens edges/barrels).
 
 
 * **`composite.py`**:
-* **Class `Shape**`: A collection of surfaces defining a 3D volume.
-* **`Inside(pos)`**: Returns boolean tensor; `True` if point is within the bounded volume.
-* **Validation**: Constructor must check for non-physical geometry (e.g., thickness resulting in self-intersecting surfaces).
+    * **Class `Shape`**: A 3D volume defined by a collection of `Surface` objects.
+        * `surfaces`: List of `Surface` instances (e.g., Front, Back, Edge).
+        * `intersectTest(rays)`: Returns matrix `[N, K]` of $t$ values for all $K$ surfaces.
+        * `intersect_surface(rays, index)`: Returns differentiable intersection for a specific surface index.
+        * `inside(local_pos)`: Boolean volume check (True if point is inside).
+        * **Children**: `Box` (auto-generates 6 planes), `ConvexPolyhedron`.
+    
+    * **Class `Shape2D`**: Finite boundaries acting on **Local Coordinates** (2D).
+        * `inside(local_pos)`: Boolean mask for aperture checks.
+        * **Children**: `Disk`, `Rectangle`, `Ellipse`.
 
 
-* **Class `Shape2D**`: A specialized `Shape` consisting of a single surface with a finite boundary (e.g., a disk or rectangle).
-* **`Inside(pos)`**: Checks if the intersection point lies within the 2D bounds.
-
-
-* **Children**: `Box`, `Singlet`, `Doublet`, `Polyhedron`.
-
-
-* **`special.py`**: Complex geometries (e.g., `Aspheric`) requiring iterative solvers.
+* **`special.py`**: Complex geometries (e.g., `Aspheric`) requiring iterative solvers. Not implemented.
 
 ---
 
@@ -61,14 +60,11 @@ Defines the spatial boundaries and intersection math.
 * **`perfPhys.py`**:
 * **Class `SurfaceFunction**`: A callable object initialized with specific parameters (like refractive index ).
 * **Logic**: Every surface in an element is assigned its own `SurfaceFunction`.
-* **Methods**:
+* **Children**:
 * `Refract`: Differentiable Snell’s Law.
 * `Reflect`: Standard vector reflection.
 * `Block`: Terminates the ray (used for apertures or "inked" lens edges).
 * `Transmit`: No change in direction.
-
-
-
 
 
 ---
