@@ -1,7 +1,8 @@
 import torch
 import math
 from .shape import Shape
-from .primitives import Sphere, Plane, Cylinder
+from .primitives import Plane, Cylinder
+from .bounded import HalfSphere
 from .transform import RayTransform
 
 
@@ -37,7 +38,7 @@ class Lens(Shape):
             #   Divide by -R (neg) -> Result is +Z.
             # - Convex Back (R<0): Center is Left. Hit is Right. (Hit-Center) is +Z.
             #   Divide by -R (pos) -> Result is +Z.
-            surf = Sphere(-R, transform=t, device=device)
+            surf = HalfSphere(-R, transform=t, device=device)
 
             # Calculate Sag Z (Edge Z position)
             # z_edge = C - sign(R) * sqrt(R^2 - (D/2)^2)
@@ -109,7 +110,7 @@ class Doublet(Lens):
         # Surface Order: [Optical 1, Optical 2, Optical 3, Edge 1, Edge 2]
         self.surfaces = [self.surf1, self.surf2, self.surf3, self.edge1, self.edge2]
 
-    def inside(self, local_pos, surf_idx=None):
+    def inBounds(self, local_pos, surf_idx=None):
         """
         Validates intersection based on surface type.
         Indices 0-2: Optical Surfaces -> Check Aperture Radius.
@@ -196,7 +197,7 @@ class Triplet(Lens):
             self.edge1, self.edge2, self.edge3
         ]
 
-    def inside(self, local_pos, surf_idx=None):
+    def inBounds(self, local_pos, surf_idx=None):
         # Optical Surfaces (0,1,2,3)
         if surf_idx < 4:
             r_sq = local_pos[:, 0] ** 2 + local_pos[:, 1] ** 2

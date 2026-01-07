@@ -46,10 +46,15 @@ class RayTransform:
         # Ideally, we create new tensors and instantiate a new Rays object.
 
         # Apply Rotation (P @ R.T is standard for row-vector multiplication)
-        local_pos = (rays.pos @ self.rot.T) + self.trans
-        local_dir = (rays.dir @ self.rot.T)
 
-        return local_pos, local_dir
+        # Inverse Translation
+        shifted_pos = rays.pos - self.trans
+
+        global_pos = shifted_pos @ self.rot
+        global_dir = rays.dir @ self.rot
+
+        return global_pos, global_dir
+
 
     def invTransform(self, rays):
         """
@@ -59,8 +64,6 @@ class RayTransform:
 
         Returns a NEW Rays object.
         """
-        # Inverse Translation
-        shifted_pos = rays.pos - self.trans
 
         # Inverse Rotation (Multiply by R on right is equivalent to multiplying by R.T on left)
         # Since R is orthogonal, R.inv = R.T.
@@ -68,10 +71,10 @@ class RayTransform:
         # Here self.rot is Local_to_Global. So we need to multiply by R_inverse.
         # @ R.T rotates forward. v @ R rotates backward.
 
-        global_pos = shifted_pos @ self.rot
-        global_dir = rays.dir @ self.rot
+        local_pos = (rays.pos @ self.rot.T) + self.trans
+        local_dir = (rays.dir @ self.rot.T)
 
-        return global_pos, global_dir
+        return local_pos, local_dir
 
     def to(self, device):
         self.device = device

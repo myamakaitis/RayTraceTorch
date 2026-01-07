@@ -21,7 +21,7 @@ def test_tir_logic():
         [0.866025, 0.5, 0.0]  # Ray 2
     ], device=device)
 
-    out, _ = refract_op(ray_dir, normal)
+    out, _ = refract_op(None, ray_dir, normal)
 
     # Check Ray 1 (Refraction)
     # Snell: 1.5 * sin(30) = 1.0 * sin(theta2)
@@ -50,7 +50,7 @@ def test_fresnel_probability():
     normal = torch.tensor([[0.0, 0.0, -1.0]], device=device).repeat(N, 1)  # -Z (opposing)
 
     # 2. Run Physics
-    out_dir, _ = refract_op(ray_dir, normal)
+    out_dir, _ = refract_op(None, ray_dir, normal)
 
     # 3. Analyze Results
     # Reflected rays will flip direction to -Z (0, 0, -1)
@@ -82,7 +82,7 @@ def test_tir_deterministic():
     ray_dir = torch.tensor([[0.866, 0.5, 0.0]], device=device).repeat(N, 1)
     normal = torch.tensor([[0.0, 1.0, 0.0]], device=device).repeat(N, 1)
 
-    out_dir, _ = refract_op(ray_dir, normal)
+    out_dir, _ = refract_op(None, ray_dir, normal)
 
     # Reflected rays should have Y component flipped (-0.5)
     # Refracted rays (impossible) would have Y > 0
@@ -102,14 +102,14 @@ def test_transmit_block():
 
     # 2. Test Transmit
     transmit_op = Transmit(device=device)
-    out_dir, intensity = transmit_op(ray_dir, normal)
+    out_dir, intensity = transmit_op(None, ray_dir, normal)
 
     assert torch.allclose(out_dir, ray_dir), "Transmit changed ray direction"
     assert torch.allclose(intensity, torch.ones(N)), "Transmit altered intensity"
 
     # 3. Test Block
     block_op = Block(device=device)
-    out_dir, intensity = block_op(ray_dir, normal)
+    out_dir, intensity = block_op(None, ray_dir, normal)
 
     # Check Intensity is 0
     assert torch.allclose(intensity, torch.zeros(N)), "Block did not zero intensity"

@@ -1,7 +1,8 @@
 import torch
 import math
 from .shape import Shape
-from .primitives import Sphere, Cylinder, Plane
+from .primitives import Cylinder, Plane
+from .bounded import HalfSphere
 from .transform import RayTransform
 
 
@@ -64,7 +65,7 @@ class Singlet(Shape):
         else:
             c1 = z_v1 + self.R1
             t1 = RayTransform(translation=torch.tensor([0., 0., c1], device=device), device=device)
-            self.surf1 = Sphere(torch.abs(self.R1), transform=t1, device=device)
+            self.surf1 = HalfSphere(torch.abs(self.R1), transform=t1, device=device)
             self.z_edge_front = self._get_sag_z(c1, self.R1, self.D)
 
         # Back Surface (V2)
@@ -75,7 +76,7 @@ class Singlet(Shape):
         else:
             c2 = z_v2 + self.R2
             t2 = RayTransform(translation=torch.tensor([0., 0., c2], device=device), device=device)
-            self.surf2 = Sphere(torch.abs(self.R2), transform=t2, device=device)
+            self.surf2 = HalfSphere(torch.abs(self.R2), transform=t2, device=device)
             self.z_edge_back = self._get_sag_z(c2, self.R2, self.D)
 
         # Check Edge Thickness
@@ -95,21 +96,22 @@ class Singlet(Shape):
         sign_R = torch.sign(R)
         return c - sign_R * root
 
-    def inside(self, local_pos, surf_idx=None):
+    def inBounds(self, local_pos, surf_idx=None):
         """
         Validates hits based on physical boundaries.
         surf_idx: 0 (Front), 1 (Back), 2 (Edge)
         """
+        z = local_pos[:, 2]
         if surf_idx == 2:
             # Edge Hit: Must be between the Z-planes of the lens edge
-            z = local_pos[:, 2]
             return (z >= self.z_edge_front) & (z <= self.z_edge_back)
         else:
             # Face Hit: Must be within the Aperture Diameter
             # r^2 <= (D/2)^2
             r_sq = local_pos[:, 0] ** 2 + local_pos[:, 1] ** 2
-            return r_sq <= self.half_D ** 2
+            in_aperture = r_sq <= self.half_D ** 2
 
+            return in_aperture
 
 class CylindricalSinglet(Singlet):
     """
@@ -127,7 +129,7 @@ class CylindricalSinglet(Singlet):
 
         # Initialize as Shape directly to avoid running Singlet.__init__ logic
         # which sets up Spheres. We need Cylinders.
-        # We manually set the attributes required by Singlet.inside()
+        # We manually set the attributes required by Singlet.inBounds()
         Shape.__init__(self, transform, device)
 
         self.R1 = R1.to(device)

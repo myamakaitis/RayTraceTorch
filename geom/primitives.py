@@ -27,6 +27,16 @@ class Surface:
         self.transform = self.transform.to(device)
         return self
 
+    def _check_t(self, t_list, *args):
+
+        t_stack = torch.stack(t_list)
+
+        t_stack.masked_fill_(t_stack <=0, float('inf'))
+
+        t_min, _ = torch.min(t_stack, dim=0)
+
+        return t_min
+
     def intersectTest(self, rays):
         """
         Performs a lightweight intersection check to find distance t.
@@ -42,7 +52,9 @@ class Surface:
         local_pos, local_dir = self.transform.transform(rays)
 
         # 2. Solve only for t
-        t = self._solve_t(local_pos, local_dir)
+        t_list = self._solve_t(local_pos, local_dir)
+
+        t = self._check_t(t_list)
 
         return t
 
@@ -60,28 +72,34 @@ class Surface:
         # 1. Transform Global -> Local
         local_pos, local_dir = self.transform.transform(rays)
 
-        # 2. Solve for t and Local Normal (Differentiable)
-        t, local_normal = self._solve_geometric_properties(local_pos, local_dir)
+        # 2. Solve only for t
+        t_list = self._solve_t(local_pos, local_dir)
+
+        t = self._check_t(t_list, local_pos, local_dir)
 
         # 3. Compute Global Hit Point
         # P_hit = P_origin + t * Direction
-        hit_point = rays.pos + t.unsqueeze(1) * rays.dir
+        hit_global = rays.pos + t.unsqueeze(1) * rays.dir
+        hit_local = rays.pos + t.unsqueeze(1) * local_dir
 
-        # 4. Transform Normal Local -> Global
+        # 4
+        normal_local = self._getNormal(hit_local)
+
+        # 5. Transform Normal Local -> Global
         # Normals are direction vectors, so we apply the rotation.
         # Consistent with transform.py: D_global = D_local @ R.T
-        global_normal = local_normal @ self.transform.rot
+        normal_global = normal_local @ self.transform.rot.T
 
-        return t, hit_point, global_normal
+        return t, hit_global, normal_global
 
     # --- Abstract Methods ---
 
-    def _solve_t(self, local_pos, local_dir):
-        """Child classes must implement the math to find t."""
+    def _getNormal(self, local_pos):
+
         raise NotImplementedError
 
-    def _solve_geometric_properties(self, local_pos, local_dir):
-        """Child classes must implement the math to find t and local_normal."""
+    def _solve_t(self, local_pos, local_dir):
+        """Child classes must implement the math to find t."""
         raise NotImplementedError
 
 
@@ -103,26 +121,14 @@ class Plane(Surface):
         safe_dz = torch.where(torch.abs(dz) < epsilon, torch.tensor(epsilon, device=self.device), dz)
 
         t = -oz / safe_dz
-        return t
+        return [t]
 
-    def _solve_geometric_properties(self, local_pos, local_dir):
-        # 1. Re-calculate t (Differentiable)
-        # We duplicate the code to ensure the graph is constructed from scratch
-        # rather than trying to re-attach the no_grad result.
-        oz = local_pos[:, 2]
-        dz = local_dir[:, 2]
+    def _getNormal(self, local_pos):
 
-        epsilon = 1e-8
-        safe_dz = torch.where(torch.abs(dz) < epsilon, torch.tensor(epsilon, device=self.device), dz)
-        t = -oz / safe_dz
+        local_normal = torch.zeros_like(local_pos)
+        local_normal[:, 2] = torch.ones_like(local_pos[:, 2])
 
-        # 2. Local Normal
-        # For a standard plane z=0, the normal is always (0, 0, 1).
-        zeros = torch.zeros_like(oz)
-        ones = torch.ones_like(oz)
-        local_normal = torch.stack([zeros, zeros, ones], dim=1)
-
-        return t, local_normal
+        return local_normal
 
 
 class Sphere(Surface):
@@ -133,105 +139,43 @@ class Sphere(Surface):
     though for a pure Sphere class, R is often more intuitive.
     Here we stick to Radius R as a parameter for explicit Spheres.
     """
-
     def __init__(self, radius, transform=None, device='cpu'):
         super().__init__(transform, device)
-        self.radius = torch.tensor(radius, dtype=torch.float32, device=device)
+        self.radius = radius.to(device)
 
     def _solve_t(self, local_pos, local_dir):
-        # Ray-Sphere Intersection: |O + tD|^2 = R^2
-        # (O+tD).(O+tD) = R^2
-        # O.O + 2t(O.D) + t^2(D.D) - R^2 = 0
-        # a*t^2 + b*t + c = 0
+        # |O + td|^2 = R^2
+        # (d.d)t^2 + 2(O.d)t + (O.O - R^2) = 0
+        # d is normalized, so a = 1
 
-        # a = 1.0 (since D is normalized)
-        # b = 2 * (O . D)
-        # c = O.O - R^2
-
-        # Dot products [N]
-        # (N,3) * (N,3) -> sum -> (N)
+        # a = 1.0
         b = 2.0 * torch.sum(local_pos * local_dir, dim=1)
         c = torch.sum(local_pos * local_pos, dim=1) - self.radius ** 2
 
-        discriminant = b ** 2 - 4.0 * c
+        discriminant = b ** 2 - 4 * c
 
-        # Initialize t as infinity (miss)
-        t = torch.full_like(b, float('inf'))
+        # Shape [N]
+        # Roots: (-b +/- sqrt(D)) / 2
 
-        # Mask for valid hits (discriminant >= 0)
         hit_mask = discriminant >= 0
-
-        if hit_mask.any():
-            sqrt_delta = torch.sqrt(discriminant[hit_mask])
-            b_valid = b[hit_mask]
-
-            # Two solutions
-            t1 = (-b_valid - sqrt_delta) / 2.0
-            t2 = (-b_valid + sqrt_delta) / 2.0
-
-            # Logic to find smallest POSITIVE t
-            # If t1 > epsilon, pick t1. Else if t2 > epsilon, pick t2.
-            # (Standard "ray trace" logic usually implies moving forward)
-            epsilon = 1e-4
-
-            # Create a localized t for valid rays
-            t_sol = torch.full_like(b_valid, float('inf'))
-
-            # Case 1: Both positive, t1 is smaller
-            # Case 2: t1 negative (inside sphere looking out?), t2 positive
-
-            # Simple vector check:
-            # We prefer t1 if t1 > eps.
-            # Otherwise we take t2 if t2 > eps.
-
-            mask_t1 = t1 > epsilon
-            t_sol[mask_t1] = t1[mask_t1]
-
-            # Where t1 was invalid, check t2
-            mask_t2 = (~mask_t1) & (t2 > epsilon)
-            t_sol[mask_t2] = t2[mask_t2]
-
-            t[hit_mask] = t_sol
-
-        return t
-
-    def _solve_geometric_properties(self, local_pos, local_dir):
-        # 1. Re-calculate t differentiably
-        b = 2.0 * torch.sum(local_pos * local_dir, dim=1)
-        c = torch.sum(local_pos ** 2, dim=1) - self.radius ** 2
-        delta = b ** 2 - 4.0 * c
-
-        # We assume hit validity was checked by the caller using intersectTest ideally,
-        # or we just handle the math. If delta < 0, sqrt(delta) is NaN -> gradients break.
-        # We clamp delta to 0 to avoid NaNs in the gradient pass for missing rays,
-        # realizing those rays should be marked "inactive" by the Scene manager anyway.
-        delta_safe = torch.relu(delta)
-        sqrt_delta = torch.sqrt(delta_safe)
+        sqrt_delta = torch.sqrt(torch.where(hit_mask, discriminant, torch.zeros_like(discriminant)))
 
         t1 = (-b - sqrt_delta) / 2.0
         t2 = (-b + sqrt_delta) / 2.0
 
-        # Selection logic (differentiable approx using torch.where)
-        epsilon = 1e-4
+        # Mark complex roots as Inf
+        inf = float('inf')
+        t1 = torch.where(hit_mask, t1, torch.full_like(t1, inf))
+        t2 = torch.where(hit_mask, t2, torch.full_like(t2, inf))
 
-        # Prefer t1 if t1 > epsilon, else t2
-        # Note: If both are negative (behind ray), we return t1 (negative)
-        # but the ray is effectively invalid.
-        t = torch.where(t1 > epsilon, t1, t2)
+        # Stack [N, 2]
+        return [t1, t2]
 
-        # 2. Local Normal
-        # For a sphere, Normal = (Hit_Point - Center) / Radius
-        # Center is (0,0,0)
-        hit_point_local = local_pos + t.unsqueeze(1) * local_dir
+    def _getNormal(self, local_pos):
 
-        # outward facing normal
-        local_normal = hit_point_local / self.radius
+        local_normal = local_pos / self.radius
 
-        # In concave cases (inside sphere), we might want the normal pointing inward.
-        # However, standard convention is surface normal always points "out" of the solid.
-        # Snell's law derivation in phys/ will handle the dot(ray, normal) sign check.
-
-        return t, local_normal
+        return local_normal
 
 
 class Cylinder(Surface):
@@ -242,7 +186,7 @@ class Cylinder(Surface):
 
     def __init__(self, radius, transform=None, device='cpu'):
         super().__init__(transform, device)
-        self.radius = torch.tensor(radius, dtype=torch.float32, device=device)
+        self.radius = radius.to(device)
 
     def _solve_t(self, local_pos, local_dir):
         # Ray: P(t) = O + tD
@@ -264,88 +208,27 @@ class Cylinder(Surface):
         # Initialize t as infinity (miss)
         t = torch.full_like(A, float('inf'))
 
-        # 1. Mask for valid hits (real roots)
         hit_mask = discriminant >= 0
+        sqrt_delta = torch.sqrt(torch.abs(discriminant))
 
-        if hit_mask.any():
-            sqrt_delta = torch.sqrt(discriminant[hit_mask])
-            A_valid = A[hit_mask]
-            B_valid = B[hit_mask]
+        t1 = (-B - sqrt_delta) / (2.0 * A)
+        t2 = (-B + sqrt_delta) / (2.0 * A)
 
-            # Solve quadratic
-            t1 = (-B_valid - sqrt_delta) / (2.0 * A_valid)
-            t2 = (-B_valid + sqrt_delta) / (2.0 * A_valid)
+        t1 = torch.where(hit_mask, t1, torch.full_like(t1, inf))
+        t2 = torch.where(hit_mask, t2, torch.full_like(t2, inf))
 
-            # Selection Logic: Smallest POSITIVE t
-            epsilon = 1e-4
+        return [t1, t2]
 
-            # Temporary holder for solutions on the masked subset
-            t_subset = torch.full_like(t1, float('inf'))
+    def _getNormal(self, local_pos):
 
-            # Check t1
-            mask_t1 = t1 > epsilon
-            t_subset[mask_t1] = t1[mask_t1]
-
-            # Check t2 (if t1 invalid OR t2 better)
-            mask_t2 = (t2 > epsilon) & ((~mask_t1) | (t2 < t_subset))
-            t_subset[mask_t2] = t2[mask_t2]
-
-            t[hit_mask] = t_subset
-
-        return t
-
-    def _solve_geometric_properties(self, local_pos, local_dir):
-        # 1. Re-calculate A, B, C for gradients
-        ox, oy = local_pos[:, 0], local_pos[:, 1]
-        dx, dy = local_dir[:, 0], local_dir[:, 1]
-
-        A = dx ** 2 + dy ** 2
-        B = 2.0 * (ox * dx + oy * dy)
-        C = (ox ** 2 + oy ** 2) - self.radius ** 2
-
-        discriminant = B ** 2 - 4.0 * A * C
-
-        # Safe sqrt for gradients
-        delta_safe = torch.relu(discriminant)
-        sqrt_delta = torch.sqrt(delta_safe)
-
-        # 2. Re-calculate roots
-        # Add epsilon to A to avoid div/0 for rays perfectly parallel to Z-axis
-        A_safe = torch.where(A.abs() < 1e-8, torch.tensor(1e-8, device=self.device), A)
-
-        t1 = (-B - sqrt_delta) / (2.0 * A_safe)
-        t2 = (-B + sqrt_delta) / (2.0 * A_safe)
-
-        # 3. Selection Logic (Differentiable)
-        epsilon = 1e-4
-
-        # Default to inf
-        t_final = torch.full_like(t1, float('inf'))
-
-        # t1 valid?
-        mask_t1 = t1 > epsilon
-        t_final = torch.where(mask_t1, t1, t_final)
-
-        # t2 valid and better?
-        mask_t2 = (t2 > epsilon) & ((~mask_t1) | (t2 < t_final))
-        t_final = torch.where(mask_t2, t2, t_final)
-
-        # Mask out misses (discriminant < 0)
-        hit_mask = discriminant >= 0
-        t = torch.where(hit_mask, t_final, torch.full_like(t_final, float('inf')))
-
-        # 4. Local Normal
-        # For cylinder along Z: Normal is (x/R, y/R, 0)
-        # We need the hit point in local coordinates
-        hit_point = local_pos + t.unsqueeze(1) * local_dir
-
-        nx = hit_point[:, 0] / self.radius
-        ny = hit_point[:, 1] / self.radius
+        nx = local_pos[:, 0] / self.radius
+        ny = local_pos[:, 1] / self.radius
         nz = torch.zeros_like(nx)
 
         local_normal = torch.stack([nx, ny, nz], dim=1)
 
-        return t, local_normal
+        return local_normal
+
 
 class Quadric(Surface):
     """
@@ -364,10 +247,10 @@ class Quadric(Surface):
                    k=0 (Sphere), k=-1 (Parabola), k<-1 (Hyperbola).
     """
 
-    def __init__(self, c, k=0.0, transform=None, device='cpu'):
+    def __init__(self, c, k, transform=None, device='cpu'):
         super().__init__(transform, device)
-        self.c = c
-        self.k = k
+        self.c = c.to(device)
+        self.k = k.to(device)
 
     def _get_coeffs(self, local_pos, local_dir):
         """
@@ -403,87 +286,40 @@ class Quadric(Surface):
         # 1. Create a mask for valid intersections (Real roots exist)
         # Rays with discriminant < 0 effectively miss the surface.
         hit_mask = discriminant >= 0
+        sqrt_delta = torch.sqrt(torch.abs(discriminant))
 
-        t = torch.full_like(discriminant, float('inf'))
+        t1 = (-B - sqrt_delta) / (2.0 * A)
+        t2 = (-B + sqrt_delta) / (2.0 * A)
 
-        if hit_mask.any():
-            # 2. Safe sqrt for gradient stability
-            # We still use relu to ensure the sqrt calculation doesn't produce NaNs
-            # for the 'False' entries in hit_mask during the backward pass.
+        inf = float('inf')
+        t1 = torch.where(hit_mask, t1, torch.full_like(t1, inf))
+        t2 = torch.where(hit_mask, t2, torch.full_like(t2, inf))
 
-            disc_valid = discriminant[hit_mask]
+        epsilon_a = 1e-7
+        mask_linear = torch.abs(A) < epsilon_a
 
-            A = A[hit_mask]
-            B = B[hit_mask]
-            C = C[hit_mask]
+        # Avoid div/0 for linear case
+        safe_B = torch.where(torch.abs(B) < 1e-8, torch.tensor(1e-8, device=self.device), B)
+        t_linear = -C / safe_B
 
-            t_sol = torch.zeros_like(disc_valid)
-            sqrt_delta = torch.sqrt(disc_valid)
+        # If A is effectively zero, use the linear solution
+        t1 = torch.where(mask_linear, t_linear, t1)
+        t2 = torch.where(mask_linear, t_linear, t2)
 
-            # Standard Quadratic Formula
-            t1 = (-B - sqrt_delta) / (2 * A)
-            t2 = (-B + sqrt_delta) / (2 * A)
-
-            # 3. Handle Linear Fallback (A ~ 0)
-            epsilon_a = 1e-7
-            mask_linear = torch.abs(A) < epsilon_a
-
-            # Avoid div/0 for linear case
-            safe_B = torch.where(torch.abs(B) < 1e-8, torch.tensor(1e-8, device=self.device), B)
-            t_linear = -C / safe_B
-
-            # If A is effectively zero, use the linear solution
-            t1 = torch.where(mask_linear, t_linear, t1)
-            t2 = torch.where(mask_linear, t_linear, t2)
-
-            # 4. Selection Logic (Smallest Positive t)
-            epsilon_t = 1e-5
-
-            # Check t1 validity (must be > epsilon)
-            mask_t1_valid = t1 > epsilon_t
-            t_sol = torch.where(mask_t1_valid, t1, t_sol)
-
-            # Check t2 validity:
-            # Accept t2 if it is positive AND (t1 was invalid OR t2 is closer than t1)
-            mask_t2_valid = t2 > epsilon_t
-            mask_t2_better = mask_t2_valid & ((~mask_t1_valid) | (t2 < t_sol))
-            t_sol = torch.where(mask_t2_better, t2, t_sol)
-
-            # 5. FINAL MASK: Apply the discriminant check
-            # If the ray mathematically missed (discriminant < 0), force t to infinity.
-
-            t[hit_mask] = t_sol
-
-        return t
+        return [t1, t2]
 
     def _solve_t(self, local_pos, local_dir):
         A, B, C = self._get_coeffs(local_pos, local_dir)
 
-        # Detached calculation for speed
-        with torch.no_grad():
-            t = self._solve_quadratic(A, B, C)
-        return t
+        t_list = self._solve_quadratic(A, B, C)
 
-    def _solve_geometric_properties(self, local_pos, local_dir):
-        # 1. Re-calculate A, B, C (Graph attached)
-        A, B, C = self._get_coeffs(local_pos, local_dir)
+        return t_list
 
-        # 2. Re-calculate t
-        t = self._solve_quadratic(A, B, C)
+    def _getNormal(self, local_pos):
 
-        # 3. Compute Local Hit Point
-        hit_point = local_pos + t.unsqueeze(1) * local_dir
-        hx, hy, hz = hit_point[:, 0], hit_point[:, 1], hit_point[:, 2]
-
-        # 4. Compute Local Normal
-        # Gradient of Implicit F(x,y,z) = c(x^2+y^2) + c(1+k)z^2 - 2z
-        # Nx = 2cx
-        # Ny = 2cy
-        # Nz = 2c(1+k)z - 2
-
-        nx = 2 * self.c * hx
-        ny = 2 * self.c * hy
-        nz = 2 * self.c * (1 + self.k) * hz - 2.0
+        nx = 2 * self.c * local_pos[:, 0]
+        ny = 2 * self.c * local_pos[:, 1]
+        nz = 2 * self.c * (1 + self.k) * local_pos[:, 2] - 2.0
 
         raw_normal = torch.stack([nx, ny, nz], dim=1)
 
@@ -492,15 +328,5 @@ class Quadric(Surface):
         norm_len = torch.norm(raw_normal, dim=1, keepdim=True)
         local_normal = raw_normal / (norm_len + 1e-8)
 
-        # Note: The gradient of F points in the -Z direction at the vertex.
-        # F = ... - 2z. dF/dz = -2.
-        # For a standard surface facing +Z (ray incoming from -Z),
-        # we usually want the normal pointing against the incoming ray (towards -Z).
-        # Our gradient gives (0,0,-1) at origin. This is correct for reflection math.
-        # If your physics engine expects normals pointing OUT (+Z), flip this sign.
-        # Based on your Plane class ((0,0,1)), you likely want normals pointing +Z.
-        # If so, negate the normal:
+        return -local_normal
 
-        local_normal = -local_normal
-
-        return t, local_normal

@@ -1,50 +1,41 @@
 from mpmath import inverse
 
 from .transform import RayTransform
-from .primitives import Plane
+from .primitives import Surface, Plane, Sphere
 
-class Shape2D(Plane):
+class SurfaceBounded(Surface):
     """
-    Base class for 2D finite boundaries (apertures).
-    Operates on the XY components of Local Space coordinates.
+    Base class for bounded surfaces
     """
 
-    def __init__(self, device='cpu', transform=None, mode=inverse):
+    def __init__(self, device='cpu', transform=None, invert=False):
 
         super().__init__(transform, device=device)
         self.device = device
         self.surface = None
+        self.invert = invert
 
-    def intersectTest(self, rays):
-        """
-        Performs a full intersection calculation tracking gradients.
+    def _check_t(self, t_list, local_pos, local_dir):
 
-        Args:
-            rays (Rays): Global ray batch.
-        Returns:
-            t (Tensor): [N] Intersection distance.
-            hit_point (Tensor): [N, 3] Global coordinates of intersection.
-            global_normal (Tensor): [N, 3] Surface normal at hit point (Global frame).
-        """
-        # 1. Transform Global -> Local
-        local_pos, local_dir = self.transform.transform(rays)
+        t_stack = torch.stack(t_list)
 
-        # 2. Solve for t and Local Normal (Differentiable)
-        t = self._solve_t(local_pos, local_dir)
+        hits_local = local_pos[None, :, :] + t_stack[:, :, None] * local_dir[None, :, :]
+        M, N, _ = hits_local.shape
 
-        local_hit = local_pos + t * local_dir
+        keep = self.inBounds(hits_local.view(-1, 3)).view(M, N)
 
-        inside = self.inside(local_hit)
+        if not self.invert:
+            keep = ~keep
 
-        if inverse:
-            # points outside of the region are intersected
-            t = torch.where(inside, t, torch.full_like(t, torch.inf))
-        else:
-            t = torch.where(torch.inverse(inside), t, torch.full_like(t, torch.inf))
+        t_stack.masked_fill_(t_stack <= 0, float('inf'))
+        t_stack.masked_fill_(~keep, float('inf'))
 
-        return
+        t_min, _ = torch.min(t_stack, dim=0)
 
-    def inside(self, local_pos):
+        return t_min
+
+
+    def inBounds(self, local_pos):
         """
         Determines if points lie within the 2D boundary.
 
@@ -56,7 +47,7 @@ class Shape2D(Plane):
         """
         raise NotImplementedError
 
-class Disk(Shape2D):
+class Disk(Plane, SurfaceBounded):
     """
     Circular aperture defined by a radius.
     """
@@ -65,14 +56,14 @@ class Disk(Shape2D):
         super().__init__(device)
         self.radius = torch.tensor(radius, dtype=torch.float32, device=device)
 
-    def inside(self, local_pos):
+    def inBounds(self, local_pos):
         # r^2 = x^2 + y^2
         # Check: r^2 <= R^2
         xy_sq = local_pos[:, 0] ** 2 + local_pos[:, 1] ** 2
         return xy_sq <= self.radius ** 2
 
 
-class Rectangle(Shape2D):
+class Rectangle(Plane, SurfaceBounded):
     """
     Rectangular aperture defined by half-widths in X and Y.
     """
@@ -82,7 +73,7 @@ class Rectangle(Shape2D):
         self.hx = torch.tensor(half_x, dtype=torch.float32, device=device)
         self.hy = torch.tensor(half_y, dtype=torch.float32, device=device)
 
-    def inside(self, local_pos):
+    def inBounds(self, local_pos):
         # |x| <= hx  AND  |y| <= hy
         abs_x = torch.abs(local_pos[:, 0])
         abs_y = torch.abs(local_pos[:, 1])
@@ -90,7 +81,7 @@ class Rectangle(Shape2D):
         return (abs_x <= self.hx) & (abs_y <= self.hy)
 
 
-class Ellipse(Shape2D):
+class Ellipse(Plane, SurfaceBounded):
     """
     Elliptical aperture defined by semi-axes X and Y.
     """
@@ -101,7 +92,7 @@ class Ellipse(Shape2D):
         self.r_major = r_major.to(device)
         self.rot = rot.to(device)
 
-    def inside(self, local_pos):
+    def inBounds(self, local_pos):
         # (x/rx)^2 + (y/ry)^2 <= 1
 
         cos_rot, sin_rot = torch.cos(self.rot), torch.sin(self.rot)
@@ -110,3 +101,24 @@ class Ellipse(Shape2D):
         dir_minor = local_pos[:, 0] * sin_rot + local_pos[:, 1] * cos_rot
 
         return ((dir_major/self.r_major)**2 + (dir_minor/r_minor)**2) <= 1.0
+
+
+class HalfSphere(Plane, SurfaceBounded):
+    """
+    A Sphere clipped to a hemisphere.
+    Logic: The valid surface is the one where the local Z coordinate
+    has the OPPOSITE sign of the Radius.
+
+    Example:
+    R > 0 (Convex Front): Center is to Right. Valid surface is Left of Center (Z < 0).
+    R < 0 (Convex Back): Center is to Left. Valid surface is Right of Center (Z > 0).
+    """
+
+    def __init__(self, R, transform=None, device='cpu'):
+        super().__init__(R, transform, device)
+
+    def inBounds(self, local_pos):
+        # Check: sign(z) != sign(R)
+        # Equivalent to: z * R < 0
+        z = local_pos[:, 2]
+        return (z * self.R) < 0

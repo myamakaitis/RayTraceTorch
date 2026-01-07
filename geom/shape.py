@@ -33,7 +33,7 @@ class Shape:
     def intersectTest(self, rays):
         """
         Calculates intersection distances (t) for ALL contained surfaces.
-        Calls self.inside() to filter physically invalid hits (clipping).
+        Calls self.inBounds() to filter physically invalid hits (clipping).
 
         Args:
             rays (Rays): Batch of N rays (Global Coordinates).
@@ -64,7 +64,7 @@ class Shape:
 
             # Check if the hit point is valid for this specific surface
             # We pass the surface index so the shape knows which boundary logic to apply
-            is_valid = self.inside(hit_point, i)
+            is_valid = self.inBounds(hit_point, i)
 
             # Combine: Must hit the math surface AND be inside the physical bounds
             valid_mask = hit_mask & is_valid
@@ -101,11 +101,11 @@ class Shape:
 
         # B. Normal: Transform Element -> Global
         # Normals rotate with the element: N_global = N_local @ R.T
-        global_normal = elem_normal @ self.transform.rot
+        global_normal = elem_normal @ self.transform.rot.T
 
         return t, hit_point, global_normal
 
-    def inside(self, local_pos, surf_idx=None):
+    def inBounds(self, local_pos, surf_idx=None):
         """
         Checks if global points 'pos' [N, 3] are inside the volume.
         Must be implemented by children.
@@ -131,7 +131,7 @@ class Box(Shape):
         # Automatically build the 6 boundary planes
         self._build_surfaces()
 
-    def inside(self, local_pos, surf_idx=None):
+    def inBounds(self, local_pos, surf_idx=None):
         # Check if point is within the box volume
         # (Used to clip the infinite planes)
         # Shift to box center

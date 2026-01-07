@@ -60,7 +60,7 @@ def test_Plane():
 
 def test_Sphere():
     print("\n--- Testing Sphere (R=10) ---")
-    R = 10.0
+    R = torch.tensor(10.0)
     sphere = Sphere(radius=R)
 
     # Rays starting at origin (inside) and outside pointing in
@@ -95,8 +95,8 @@ def test_Quadric():
     # For k=-1, term under sqrt becomes 1. Denom becomes 2.
     # z = c * r^2 / 2  =>  z = 0.05 * (x^2 + y^2)
 
-    c = 0.1
-    k = -1.0
+    c = torch.tensor(0.1)
+    k = torch.tensor(-1.0)
     quadric = Quadric(c=c, k=k)
 
     # Ray parallel to axis at y=2
@@ -125,8 +125,8 @@ def test_Quadric():
     # c=0.1, k=0 (Sphere, effectively)
     # Implicit check: F(x,y,z) = c(x^2 + y^2) + c(1+k)z^2 - 2z = 0
 
-    c = 0.1
-    k = 0.0
+    c = torch.tensor(0.1)
+    k = torch.tensor(0.0)
     quadric = Quadric(c=c, k=k)
 
     # Random bundle of rays

@@ -43,11 +43,11 @@ Defines the spatial boundaries and intersection math.
         * `surfaces`: List of `Surface` instances (e.g., Front, Back, Edge).
         * `intersectTest(rays)`: Returns matrix `[N, K]` of $t$ values for all $K$ surfaces.
         * `intersect_surface(rays, index)`: Returns differentiable intersection for a specific surface index.
-        * `inside(local_pos)`: Boolean volume check (True if point is inside).
+        * `inBounds(local_pos)`: Boolean volume check (True if point is inside).
         * **Children**: `Box` (auto-generates 6 planes), `ConvexPolyhedron`.
     
     * **Class `Shape2D`**: Finite boundaries acting on **Local Coordinates** (2D).
-        * `inside(local_pos)`: Boolean mask for aperture checks.
+        * `inBounds(local_pos)`: Boolean mask for aperture checks.
         * **Children**: `Disk`, `Rectangle`, `Ellipse`.
 
 
