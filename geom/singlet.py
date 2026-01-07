@@ -34,7 +34,7 @@ class Singlet(Shape):
             D (Tensor): Diameter of the lens.
             T (Tensor): Center thickness.
         """
-        super().__init__(transform, device)
+        super().__init__(transform=transform, device=device)
 
         self.R1 = R1.to(device)
         self.R2 = R2.to(device)
@@ -65,7 +65,7 @@ class Singlet(Shape):
         else:
             c1 = z_v1 + self.R1
             t1 = RayTransform(translation=torch.tensor([0., 0., c1], device=device), device=device)
-            self.surf1 = HalfSphere(torch.abs(self.R1), transform=t1, device=device)
+            self.surf1 = HalfSphere(self.R1, transform=t1, device=device)
             self.z_edge_front = self._get_sag_z(c1, self.R1, self.D)
 
         # Back Surface (V2)
@@ -76,7 +76,7 @@ class Singlet(Shape):
         else:
             c2 = z_v2 + self.R2
             t2 = RayTransform(translation=torch.tensor([0., 0., c2], device=device), device=device)
-            self.surf2 = HalfSphere(torch.abs(self.R2), transform=t2, device=device)
+            self.surf2 = HalfSphere(self.R2, transform=t2, device=device)
             self.z_edge_back = self._get_sag_z(c2, self.R2, self.D)
 
         # Check Edge Thickness

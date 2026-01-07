@@ -1,5 +1,5 @@
-from mpmath import inverse
 
+import torch
 from .transform import RayTransform
 from .primitives import Surface, Plane, Sphere
 
@@ -10,7 +10,7 @@ class SurfaceBounded(Surface):
 
     def __init__(self, device='cpu', transform=None, invert=False):
 
-        super().__init__(transform, device=device)
+        super().__init__(transform=transform, device=device)
         self.device = device
         self.surface = None
         self.invert = invert
@@ -103,7 +103,7 @@ class Ellipse(Plane, SurfaceBounded):
         return ((dir_major/self.r_major)**2 + (dir_minor/r_minor)**2) <= 1.0
 
 
-class HalfSphere(Plane, SurfaceBounded):
+class HalfSphere(Sphere, SurfaceBounded):
     """
     A Sphere clipped to a hemisphere.
     Logic: The valid surface is the one where the local Z coordinate
@@ -115,10 +115,10 @@ class HalfSphere(Plane, SurfaceBounded):
     """
 
     def __init__(self, R, transform=None, device='cpu'):
-        super().__init__(R, transform, device)
+        super().__init__(R, transform=transform, device=device)
 
     def inBounds(self, local_pos):
         # Check: sign(z) != sign(R)
         # Equivalent to: z * R < 0
         z = local_pos[:, 2]
-        return (z * self.R) < 0
+        return (z * self.radius) > 0

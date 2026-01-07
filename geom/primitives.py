@@ -54,7 +54,7 @@ class Surface:
         # 2. Solve only for t
         t_list = self._solve_t(local_pos, local_dir)
 
-        t = self._check_t(t_list)
+        t = self._check_t(t_list, local_pos, local_dir)
 
         return t
 
@@ -140,7 +140,7 @@ class Sphere(Surface):
     Here we stick to Radius R as a parameter for explicit Spheres.
     """
     def __init__(self, radius, transform=None, device='cpu'):
-        super().__init__(transform, device)
+        super().__init__(transform=transform, device=device)
         self.radius = radius.to(device)
 
     def _solve_t(self, local_pos, local_dir):
@@ -214,6 +214,7 @@ class Cylinder(Surface):
         t1 = (-B - sqrt_delta) / (2.0 * A)
         t2 = (-B + sqrt_delta) / (2.0 * A)
 
+        inf = float('inf')
         t1 = torch.where(hit_mask, t1, torch.full_like(t1, inf))
         t2 = torch.where(hit_mask, t2, torch.full_like(t2, inf))
 

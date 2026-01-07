@@ -38,7 +38,7 @@ class Lens(Shape):
             #   Divide by -R (neg) -> Result is +Z.
             # - Convex Back (R<0): Center is Left. Hit is Right. (Hit-Center) is +Z.
             #   Divide by -R (pos) -> Result is +Z.
-            surf = HalfSphere(-R, transform=t, device=device)
+            surf = HalfSphere(R, transform=t, device=device)
 
             # Calculate Sag Z (Edge Z position)
             # z_edge = C - sign(R) * sqrt(R^2 - (D/2)^2)
@@ -65,7 +65,7 @@ class Doublet(Lens):
                  transform=None,
                  device='cpu'):
 
-        super().__init__(transform, device)
+        super().__init__(transform=transform, device=device)
 
         self.R1, self.R2, self.R3 = R1.to(device), R2.to(device), R3.to(device)
         self.T1, self.T2 = T1.to(device), T2.to(device)
