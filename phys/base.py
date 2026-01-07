@@ -187,22 +187,10 @@ class RefractFresnel(SurfaceFunction):
         # Initialize R with 1.0 (TIR case)
         R = torch.ones_like(cos_i)
 
-        # Calculate Fresnel R only where NOT TIR
-        # (Avoid gradients blowing up in TIR branch)
-        if (~is_tir).any():
-            # Mask out TIR for calculation
-            # We clone to avoid in-place errors if needed, though usually fine here
-            non_tir_mask = ~is_tir
-            r_val = self._fresnel_reflectance(cos_i[non_tir_mask], cos_t[non_tir_mask])
-
-            # Scatter back into R
-            # Note: In-place scatter is tricky with autograd.
-            # Better to compute full tensors or use torch.where
-
-            # Full tensor computation (safe because we use where later)
-            # The calculation might produce garbage for TIR indices, but we filter them.
-            r_full = self._fresnel_reflectance(cos_i, cos_t)
-            R = torch.where(is_tir, torch.tensor(1.0, device=self.device), r_full)
+        # Full tensor computation (safe because we use where later)
+        # The calculation might produce garbage for TIR indices, but we filter them.
+        r_full = self._fresnel_reflectance(cos_i, cos_t)
+        R = torch.where(is_tir, torch.tensor(1.0, device=self.device), r_full)
 
         # 4. Stochastic Decision (Monte Carlo)
         # Generate random values [0, 1)

@@ -11,41 +11,28 @@ class Lens(Shape):
     Base class for lens stacks to share utility methods.
     """
 
-    def _make_surface(self, z_vertex, R, diameter, device):
+    def _make_surface(self, z_vertex, C, device):
         """
-        Creates an optical surface (Sphere or Plane) oriented with Normal pointing +Z.
-        Returns: (SurfaceObject, EdgeZPosition)
+        Creates an optical surface (Quadric/HalfSphere) at the specified vertex.
         """
-        # 1. Plane (Inf Radius)
-        if torch.isinf(R):
-            # Standard Plane: Normal points +Z (0,0,1).
-            # We use Identity rotation (default).
-            t = RayTransform(translation=torch.tensor([0., 0., z_vertex], device=device), device=device)
-            surf = Plane(transform=t, device=device)
-            z_edge = z_vertex
 
-        # 2. Sphere (Finite Radius)
-        else:
-            # Center of Curvature: C = V + R
-            c = z_vertex + R
-            t = RayTransform(translation=torch.tensor([0., 0., c], device=device), device=device)
+        # 2. Transform (Vertex-based)
+        t = RayTransform(translation=torch.tensor([0., 0., z_vertex], device=device), device=device)
 
-            # OPTICAL CONVENTION: Normal points +Z.
-            # The Sphere primitive calculates Normal = (Hit - Center) / Radius.
-            # To ensure the normal points +Z (Forward), we pass -R.
-            # Logic:
-            # - Convex Front (R>0): Center is Right. Hit is Left. (Hit-Center) is -Z.
-            #   Divide by -R (neg) -> Result is +Z.
-            # - Convex Back (R<0): Center is Left. Hit is Right. (Hit-Center) is +Z.
-            #   Divide by -R (pos) -> Result is +Z.
-            surf = HalfSphere(R, transform=t, device=device)
+        # 3. Create Surface
+        surf = HalfSphere(curvature=C, transform=t, device=device)
 
-            # Calculate Sag Z (Edge Z position)
-            # z_edge = C - sign(R) * sqrt(R^2 - (D/2)^2)
-            r_sq = (diameter / 2.0) ** 2
-            root = torch.sqrt(R ** 2 - r_sq)
-            # Note: We use the actual sign of R for geometry, not the flipped one for normals
-            z_edge = c - torch.sign(R) * root
+        # 4. Calculate Sag for Edge Position
+        # z = c*r^2 / (1 + sqrt(1 - c^2 r^2))
+        r = self.D / 2.0
+        r_sq = r ** 2
+
+        term = 1.0 - C ** 2 * r_sq
+        term = torch.relu(term)
+        sqrt_term = torch.sqrt(term)
+
+        sag = (C * r_sq) / (1.0 + sqrt_term)
+        z_edge = z_vertex + sag
 
         return surf, z_edge
 
@@ -56,9 +43,9 @@ class Doublet(Lens):
     """
 
     def __init__(self,
-                 R1: torch.Tensor,
-                 R2: torch.Tensor,
-                 R3: torch.Tensor,
+                 C1: torch.Tensor,
+                 C2: torch.Tensor,
+                 C3: torch.Tensor,
                  T1: torch.Tensor,
                  T2: torch.Tensor,
                  D: torch.Tensor,
@@ -67,15 +54,15 @@ class Doublet(Lens):
 
         super().__init__(transform=transform, device=device)
 
-        self.R1, self.R2, self.R3 = R1.to(device), R2.to(device), R3.to(device)
+        self.C1, self.C2, self.C3 = C1.to(device), C2.to(device), C3.to(device)
         self.T1, self.T2 = T1.to(device), T2.to(device)
         self.D = D.to(device)
         self.half_D = self.D / 2.0
 
         # 1. Validation
         with torch.no_grad():
-            for R, name in [(self.R1, 'R1'), (self.R2, 'R2'), (self.R3, 'R3')]:
-                if not torch.isinf(R) and abs(2 * R.item()) < self.D.item():
+            for C, name in [(self.C1, 'R1'), (self.C2, 'R2'), (self.C3, 'R3')]:
+                if abs(0.5 * C.item()) > 1 / self.D.item():
                     raise ValueError(f"|{name}| must be larger than D")
             if self.T1.item() <= 1e-6 or self.T2.item() <= 1e-6:
                 raise ValueError("Thicknesses T1 and T2 must be positive")
@@ -88,9 +75,9 @@ class Doublet(Lens):
 
         # 3. Construct Optical Surfaces & Get Edge Bounds
         # Note: z_e is the Z-coordinate where the surface intersects the cylinder of diameter D
-        self.surf1, z_e1 = self._make_surface(z_v1, self.R1, self.D.item(), device)
-        self.surf2, z_e2 = self._make_surface(z_v2, self.R2, self.D.item(), device)
-        self.surf3, z_e3 = self._make_surface(z_v3, self.R3, self.D.item(), device)
+        self.surf1, z_e1 = self._make_surface(z_v1, self.C1, device)
+        self.surf2, z_e2 = self._make_surface(z_v2, self.C2, device)
+        self.surf3, z_e3 = self._make_surface(z_v3, self.C3, device)
 
         # 4. Check Element Edge Thicknesses
         with torch.no_grad():
@@ -139,7 +126,7 @@ class Triplet(Lens):
     """
 
     def __init__(self,
-                 R1: torch.Tensor, R2: torch.Tensor, R3: torch.Tensor, R4: torch.Tensor,
+                 C1: torch.Tensor, C2: torch.Tensor, C3: torch.Tensor, C4: torch.Tensor,
                  T1: torch.Tensor, T2: torch.Tensor, T3: torch.Tensor,
                  D: torch.Tensor,
                  transform=None,
@@ -147,17 +134,17 @@ class Triplet(Lens):
 
         super().__init__(transform, device)
 
-        self.R1, self.R2 = R1.to(device), R2.to(device)
-        self.R3, self.R4 = R3.to(device), R4.to(device)
+        self.C1, self.C2 = C1.to(device), C2.to(device)
+        self.C3, self.C4 = C3.to(device), C4.to(device)
         self.T1, self.T2, self.T3 = T1.to(device), T2.to(device), T3.to(device)
         self.D = D.to(device)
         self.half_D = self.D / 2.0
 
         # 1. Validation
         with torch.no_grad():
-            for R in [self.R1, self.R2, self.R3, self.R4]:
-                if not torch.isinf(R) and abs(2 * R.item()) < self.D.item():
-                    raise ValueError(f"Radius {R.item()} too small for diameter {self.D.item()}")
+            for C, name in [(self.C1, 'R1'), (self.C2, 'R2'), (self.C3, 'R3')]:
+                if abs(0.5 * C.item()) > 1 / self.D.item():
+                    raise ValueError(f"|{name}| must be larger than D")
             if any(t.item() <= 1e-6 for t in [self.T1, self.T2, self.T3]):
                 raise ValueError("Thicknesses must be positive")
 
@@ -169,10 +156,10 @@ class Triplet(Lens):
         z_v4 = z_v3 + self.T3
 
         # 3. Optical Surfaces & Bounds
-        self.surf1, z_e1 = self._make_surface(z_v1, self.R1, self.D.item(), device)
-        self.surf2, z_e2 = self._make_surface(z_v2, self.R2, self.D.item(), device)
-        self.surf3, z_e3 = self._make_surface(z_v3, self.R3, self.D.item(), device)
-        self.surf4, z_e4 = self._make_surface(z_v4, self.R4, self.D.item(), device)
+        self.surf1, z_e1 = self._make_surface(z_v1, self.C1, device)
+        self.surf2, z_e2 = self._make_surface(z_v2, self.C2, device)
+        self.surf3, z_e3 = self._make_surface(z_v3, self.C3, device)
+        self.surf4, z_e4 = self._make_surface(z_v4, self.C4, device)
 
         # 4. Check Edge Thicknesses
         with torch.no_grad():

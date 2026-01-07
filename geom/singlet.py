@@ -21,32 +21,32 @@ class Singlet(Shape):
     """
 
     def __init__(self,
-                 R1: torch.Tensor,
-                 R2: torch.Tensor,
+                 C1: torch.Tensor,
+                 C2: torch.Tensor,
                  D: torch.Tensor,
                  T: torch.Tensor,
                  transform=None,
                  device='cpu'):
         """
         Args:
-            R1 (Tensor): Radius of curvature of front surface (Inf for Plane).
-            R2 (Tensor): Radius of curvature of back surface (Inf for Plane).
+            C1 (Tensor): curvature of front surface (Inf for Plane).
+            C2 (Tensor): curvature of back surface (Inf for Plane).
             D (Tensor): Diameter of the lens.
             T (Tensor): Center thickness.
         """
         super().__init__(transform=transform, device=device)
 
-        self.R1 = R1.to(device)
-        self.R2 = R2.to(device)
+        self.C1 = C1.to(device)
+        self.C2 = C2.to(device)
         self.D = D.to(device)
         self.T = T.to(device)
         self.half_D = self.D / 2.0
 
         # Validation
         with torch.no_grad():
-            if not torch.isinf(self.R1) and abs(2 * self.R1.item()) < self.D.item():
+            if abs(0.5 * self.C1.item()) > 1/self.D.item():
                 raise ValueError(f"|R1| must be larger than D/2")
-            if not torch.isinf(self.R2) and abs(2 * self.R2.item()) < self.D.item():
+            if abs(0.5 * self.C2.item()) > 1/self.D.item():
                 raise ValueError(f"|R2| must be larger than D/2")
             if self.T.item() <= 1e-6:
                 raise ValueError("Thickness T must be positive")
@@ -55,29 +55,13 @@ class Singlet(Shape):
         z_v1 = -self.T / 2.0
         z_v2 = self.T / 2.0
 
-        # Front Surface (V1)
-        if torch.isinf(self.R1):
-            rot_matrix = torch.tensor([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]], device=device)
-            t1 = RayTransform(translation=torch.tensor([0., 0., z_v1], device=device),
-                              rotation=rot_matrix, device=device)
-            self.surf1 = Plane(transform=t1, device=device)
-            self.z_edge_front = z_v1
-        else:
-            c1 = z_v1 + self.R1
-            t1 = RayTransform(translation=torch.tensor([0., 0., c1], device=device), device=device)
-            self.surf1 = HalfSphere(self.R1, transform=t1, device=device)
-            self.z_edge_front = self._get_sag_z(c1, self.R1, self.D)
+        t1 = RayTransform(translation=torch.tensor([0., 0., z_v1], device=device), device=device)
+        self.surf1 = HalfSphere(curvature=self.C1, transform=t1, device=device)
+        self.z_edge_front = self._get_sag_z_vertex(z_v1, self.C1, self.D)
 
-        # Back Surface (V2)
-        if torch.isinf(self.R2):
-            t2 = RayTransform(translation=torch.tensor([0., 0., z_v2], device=device), device=device)
-            self.surf2 = Plane(transform=t2, device=device)
-            self.z_edge_back = z_v2
-        else:
-            c2 = z_v2 + self.R2
-            t2 = RayTransform(translation=torch.tensor([0., 0., c2], device=device), device=device)
-            self.surf2 = HalfSphere(self.R2, transform=t2, device=device)
-            self.z_edge_back = self._get_sag_z(c2, self.R2, self.D)
+        t2 = RayTransform(translation=torch.tensor([0., 0., z_v2], device=device), device=device)
+        self.surf2 = HalfSphere(curvature=self.C2, transform=t2, device=device)
+        self.z_edge_back = self._get_sag_z_vertex(z_v2, self.C2, self.D)
 
         # Check Edge Thickness
         with torch.no_grad():
@@ -90,11 +74,17 @@ class Singlet(Shape):
         # Order MUST be [Front, Back, Edge] for inside() logic
         self.surfaces = [self.surf1, self.surf2, self.edge]
 
-    def _get_sag_z(self, c, R, diameter):
+    def _get_sag_z_vertex(self, z_v, c, diameter):
+        """Calculates Z-coordinate of the surface edge relative to vertex Z."""
         r_sq = (diameter / 2.0) ** 2
-        root = torch.sqrt(R ** 2 - r_sq)
-        sign_R = torch.sign(R)
-        return c - sign_R * root
+
+        # Sag equation for vertex formulation
+        term = 1.0 - c ** 2 * r_sq
+        term = torch.relu(term)
+        denom = 1.0 + torch.sqrt(term)
+
+        sag = (c * r_sq) / denom
+        return z_v + sag
 
     def inBounds(self, local_pos, surf_idx=None):
         """

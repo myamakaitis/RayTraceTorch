@@ -1,7 +1,7 @@
 
 import torch
 from .transform import RayTransform
-from .primitives import Surface, Plane, Sphere
+from .primitives import Surface, Plane, Sphere, Quadric
 
 class SurfaceBounded(Surface):
     """
@@ -24,11 +24,10 @@ class SurfaceBounded(Surface):
 
         keep = self.inBounds(hits_local.view(-1, 3)).view(M, N)
 
-        if not self.invert:
+        if self.invert:
             keep = ~keep
 
-        t_stack.masked_fill_(t_stack <= 0, float('inf'))
-        t_stack.masked_fill_(~keep, float('inf'))
+        t_stack = t_stack.masked_fill((t_stack <= 0) | ~keep , float('inf'))
 
         t_min, _ = torch.min(t_stack, dim=0)
 
@@ -103,7 +102,7 @@ class Ellipse(Plane, SurfaceBounded):
         return ((dir_major/self.r_major)**2 + (dir_minor/r_minor)**2) <= 1.0
 
 
-class HalfSphere(Sphere, SurfaceBounded):
+class HalfSphere(Quadric, SurfaceBounded):
     """
     A Sphere clipped to a hemisphere.
     Logic: The valid surface is the one where the local Z coordinate
@@ -114,11 +113,11 @@ class HalfSphere(Sphere, SurfaceBounded):
     R < 0 (Convex Back): Center is to Left. Valid surface is Right of Center (Z > 0).
     """
 
-    def __init__(self, R, transform=None, device='cpu'):
-        super().__init__(R, transform=transform, device=device)
+    def __init__(self, curvature, transform=None, device='cpu'):
+        super().__init__(c = curvature, k = torch.tensor(0.0, dtype=curvature.dtype), transform=transform, device=device)
 
     def inBounds(self, local_pos):
         # Check: sign(z) != sign(R)
         # Equivalent to: z * R < 0
         z = local_pos[:, 2]
-        return (z * self.radius) > 0
+        return torch.abs(z * self.c) < 1.001

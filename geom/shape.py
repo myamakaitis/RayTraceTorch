@@ -59,8 +59,8 @@ class Shape:
             hit_mask = t < float('inf')
 
             # Create a safe t tensor for position calculation (replace inf with 0)
-            t_safe = torch.where(hit_mask, t, torch.zeros_like(t))
-            hit_point = local_pos + t_safe.unsqueeze(1) * local_dir
+            # t_safe = torch.where(hit_mask, t, torch.zeros_like(t))
+            hit_point = local_pos + t.unsqueeze(1) * local_dir
 
             # Check if the hit point is valid for this specific surface
             # We pass the surface index so the shape knows which boundary logic to apply
@@ -75,7 +75,7 @@ class Shape:
         # Stack into a matrix [N, Number_of_Surfaces]
         return torch.stack(t_list, dim=1)
 
-    def intersect_surface(self, rays, surf_idx):
+    def intersectSurface(self, rays, surf_idx):
         """
         Calculates the full differentiable intersection for a SPECIFIC surface index.
         Used after logic determines which surface was actually hit.
@@ -112,46 +112,51 @@ class Shape:
         """
         raise NotImplementedError
 
+class CvxPolyhedron(Shape):
 
-class Box(Shape):
+    def __init__(self, planes_list, transform=None, device='cpu'):
+
+        super().__init__(transform=transform, device=device)
+
+        self.PlaneRotMat = torch.stack([plane.transform.rot[2, :] for plane in planes_list])
+        self.PlaneTrans = torch.stack([plane.transform.trans for plane in planes_list])
+        self.surfaces = planes_list
+
+    def inBounds(self, local_pos, surf_idx = None):
+
+        local_pos_trans = local_pos[None, :, :] - self.PlaneTrans[:, None, :]
+        local_z = torch.sum(self.PlaneRotMat[:, None, :] * local_pos_trans, dim=-1)
+
+        in_bounds = local_z < 1e-4
+
+        if surf_idx is not None:
+            in_bounds[surf_idx, :] = True
+
+        return torch.all(in_bounds, dim=0)
+
+
+class Box(CvxPolyhedron):
     """
     A rectangular prism defined by 6 Plane surfaces.
     """
 
-    def __init__(self, center, length, width, height, transform=None, device='cpu'):
-        super().__init__(transform=transform, device=device)
+    def __init__(self, length, width, height, transform=None, device='cpu'):
 
-        self.center = center.to(device)
+        self.device = device
         self.length = length.to(device)
         self.width = width.to(device)
         self.height = height.to(device)
 
-        self.half_size = torch.tensor([self.width/2, self.height/2, self.length/2], device=self.device)
+        planes = self._build_surfaces()
 
-        # Automatically build the 6 boundary planes
-        self._build_surfaces()
-
-    def inBounds(self, local_pos, surf_idx=None):
-        # Check if point is within the box volume
-        # (Used to clip the infinite planes)
-        # Shift to box center
-        rel_pos = local_pos - self.center
-
-        # Allow small epsilon for floating point hits exactly on the face
-        eps = 1e-4
-        inside_mask = torch.all(torch.abs(rel_pos) <= (self.half_size + eps), dim=1)
-        return inside_mask
+        super().__init__(planes_list = planes, transform=transform, device=device)
 
     def _build_surfaces(self):
         """
         Generates 6 infinite planes oriented to form the box faces.
-        Note: The 'Plane' primitive is infinite. The logic to treat this as a
-        finite box usually relies on:
-        1. intersectTest returns t for all 6 infinite planes.
-        2. Logic checks if the hit point on plane i is within the bounds of the other axes.
-           (OR we simply use this for constructive solid geometry).
         """
-        cx, cy, cz = self.center
+
+        surfaces = []
 
         # Helper to create a plane with specific position and rotation
         def make_plane(pos, rot_angles):
@@ -174,24 +179,26 @@ class Box(Shape):
 
         # 1. Front (+Z face)
         # Canonical Plane is XY facing +Z. We just translate it to +hz.
-        self.surfaces.append(make_plane([cx, cy, cz + self.length/2], [0.0, 0.0, 0.0]))
+        surfaces.append(make_plane([0, 0, 0 + self.length/2], [0.0, 0.0, 0.0]))
 
         # 2. Back (-Z face)
         # Rotate 180 Y so it faces -Z. Translate to -hz.
-        self.surfaces.append(make_plane([cx, cy, cz - self.length/2], [0.0, torch.pi, 0.0]))
+        surfaces.append(make_plane([0, 0, 0 - self.length/2], [0.0, torch.pi, 0.0]))
 
         # 3. Right (+X face)
         # Rotate +90 Y. Normal (0,0,1) -> (1,0,0). Translate to +hx.
-        self.surfaces.append(make_plane([cx + self.width/2, cy, cz], [0.0, torch.pi / 2, 0.0]))
+        surfaces.append(make_plane([0 + self.width/2, 0, 0], [0.0, -torch.pi / 2, 0.0]))
 
         # 4. Left (-X face)
         # Rotate -90 Y. Normal (0,0,1) -> (-1,0,0). Translate to -hx.
-        self.surfaces.append(make_plane([cx - self.width/2, cy, cz], [0.0, -torch.pi / 2, 0.0]))
+        surfaces.append(make_plane([0 - self.width/2, 0, 0], [0.0, torch.pi / 2, 0.0]))
 
         # 5. Top (+Y face)
         # Rotate -90 X. Normal (0,0,1) -> (0,1,0). Translate to +hy.
-        self.surfaces.append(make_plane([cx, cy + self.height/2, cz], [-torch.pi / 2, 0.0, 0.0]))
+        surfaces.append(make_plane([0, 0 + self.height/2, 0], [torch.pi / 2, 0.0, 0.0]))
 
         # 6. Bottom (-Y face)
         # Rotate +90 X. Normal (0,0,1) -> (0,-1,0). Translate to -hy.
-        self.surfaces.append(make_plane([cx, cy - self.height/2, cz], [torch.pi / 2, 0.0, 0.0]))
+        surfaces.append(make_plane([0, 0 - self.height/2, 0], [-torch.pi / 2, 0.0, 0.0]))
+
+        return surfaces

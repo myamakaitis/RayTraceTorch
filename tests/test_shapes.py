@@ -28,11 +28,8 @@ def scan_lens_profile(lens, axis='x', num_points=200):
     # Determine scan width based on available attributes
     if hasattr(lens, 'D'):
         width = lens.D.item()
-    elif hasattr(lens, 'size'):
-        # size is [x, y, z]. Use the max dimension to ensure coverage.
-        width = torch.max(lens.size).item()
     else:
-        width = 20.0  # Default fallback
+        width = 3  # Default fallback
 
     margin = 1.2  # Scan slightly beyond bounds to catch edges
     extent = width * margin
@@ -128,36 +125,38 @@ def test_lenses():
 
     # 1. Bi-Convex Singlet
     # R1=50 (Center Right), R2=-50 (Center Left), D=25, T=10
-    s1 = Singlet(R1=torch.tensor(50.0), R2=torch.tensor(-50.0), D=torch.tensor(25.0), T=torch.tensor(10.0))
+    s1 = Singlet(C1=1/torch.tensor(50.0), C2=1/torch.tensor(-50.0), D=torch.tensor(25.0), T=torch.tensor(10.0))
     plot_lens(s1, "Bi-Convex Singlet", "singlet_biconvex.png")
 
     # 2. Meniscus Singlet
     # R1=30 (Convex), R2=100 (Concave, following), D=20, T=5
-    s2 = Singlet(R1=torch.tensor(30.0), R2=torch.tensor(100.0), D=torch.tensor(20.0), T=torch.tensor(5.0))
+    s2 = Singlet(C1=1/torch.tensor(30.0), C2=1/torch.tensor(100.0), D=torch.tensor(20.0), T=torch.tensor(5.0))
     plot_lens(s2, "Meniscus Singlet", "singlet_meniscus.png")
 
     # 3. Plano-Convex Singlet
     # R1=Inf, R2=-40, D=25, T=8
-    s3 = Singlet(R1=torch.tensor(torch.inf), R2=torch.tensor(-40.0), D=torch.tensor(25.0), T=torch.tensor(8.0))
+    s3 = Singlet(C1=torch.tensor(0.0), C2=1/torch.tensor(-40.0), D=torch.tensor(25.0), T=torch.tensor(8.0))
     plot_lens(s3, "Plano-Convex Singlet", "singlet_plano.png")
 
+    s4 = Singlet(C1=torch.tensor(0.0), C2=1/torch.tensor(-12.6), D=torch.tensor(25.0), T=torch.tensor(12.7))
+    plot_lens(s4, "Half-Sphere Singlet", "half_sphere.png")
+
     # 4. Doublet (Achromat Style)
-    d1 = Doublet(R1=torch.tensor(50.0), R2=torch.tensor(-50.0), R3=torch.tensor(-200.0),
+    d1 = Doublet(C1=1/torch.tensor(50.0), C2=1/torch.tensor(-50.0), C3=1/torch.tensor(-200.0),
                  T1=torch.tensor(10.0), T2=torch.tensor(5.0), D=torch.tensor(25.0))
     plot_lens(d1, "Cemented Doublet", "doublet.png")
 
     # 5. Triplet (Symmetric / Hastings Style)
-    t1 = Triplet(R1=torch.tensor(40.0), R2=torch.tensor(30.0), R3=torch.tensor(30.0), R4=torch.tensor(-40.0),
+    t1 = Triplet(C1=1/torch.tensor(40.0), C2=1/torch.tensor(30.0), C3=1/torch.tensor(30.0), C4=1/torch.tensor(-40.0),
                  T1=torch.tensor(8.0), T2=torch.tensor(4.0), T3=torch.tensor(8.0), D=torch.tensor(20.0))
     plot_lens(t1, "Symmetric Triplet", "triplet.png")
 
     # 6. Rectangular Box
     # Center=(0,0,0)
-    boxTransform = RayTransform(rotation=eulerToRotMat(torch.tensor([0, 0, 0])))
+    boxTransform = RayTransform(rotation=eulerToRotMat(torch.tensor([0, np.pi/4, np.pi/4])))
 
-    b1 = Box(center=torch.tensor([0., 0., 0.]),
-             length = torch.tensor(10.0), height=torch.tensor(20.0), width=torch.tensor(30.0),
+    b1 = Box(length = torch.tensor(1.0), width=torch.tensor(1.0), height=torch.tensor(1.0),
              transform=boxTransform)
-    plot_lens(b1, "Rectangular Box (20x15x30)", "box.png")
+    plot_lens(b1, "Rectangular Box (20x30x10)", "box.png")
 
 

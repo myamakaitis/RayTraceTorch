@@ -31,7 +31,7 @@ class Surface:
 
         t_stack = torch.stack(t_list)
 
-        t_stack.masked_fill_(t_stack <=0, float('inf'))
+        t_stack = t_stack.masked_fill(t_stack <=0, float('inf'))
 
         t_min, _ = torch.min(t_stack, dim=0)
 
@@ -249,7 +249,7 @@ class Quadric(Surface):
     """
 
     def __init__(self, c, k, transform=None, device='cpu'):
-        super().__init__(transform, device)
+        super().__init__(transform = transform, device = device)
         self.c = c.to(device)
         self.k = k.to(device)
 
