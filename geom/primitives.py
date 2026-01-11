@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from .transform import RayTransform
 
 
@@ -10,10 +11,10 @@ class Surface(nn.Module):
     2. intersect: Detailed, differentiable, returns t, hit_point, and global_normal.
     """
 
-    def __init__(self, transform=None, device='cpu'):
+    def __init__(self, transform=None):
 
         super().__init__()
-        self.device = device
+
         if transform is None:
             self.transform = RayTransform(device=device)
         else:
@@ -131,9 +132,9 @@ class Sphere(Surface):
     though for a pure Sphere class, R is often more intuitive.
     Here we stick to Radius R as a parameter for explicit Spheres.
     """
-    def __init__(self, radius, transform=None, device='cpu'):
-        super().__init__(transform=transform, device=device)
-        self.radius = radius.to(device)
+    def __init__(self, radius, transform=None):
+        super().__init__(transform=transform)
+        self.radius = torch.nn.Parameter(torch.tensor(radius, device=self.device))
 
     def _solve_t(self, local_pos, local_dir):
         # |O + td|^2 = R^2
@@ -176,9 +177,10 @@ class Cylinder(Surface):
     Equation: x^2 + y^2 = R^2
     """
 
-    def __init__(self, radius, transform=None, device='cpu'):
-        super().__init__(transform, device)
-        self.radius = radius.to(device)
+    def __init__(self, radius, transform=None,
+                 radius_grad = False):
+        super().__init__(transform)
+        self.radius = nn.Parameter(torch.tensor(radius), requires_grad=radius_grad)
 
     def _solve_t(self, local_pos, local_dir):
         # Ray: P(t) = O + tD
@@ -240,10 +242,14 @@ class Quadric(Surface):
                    k=0 (Sphere), k=-1 (Parabola), k<-1 (Hyperbola).
     """
 
-    def __init__(self, c, k, transform=None, device='cpu'):
-        super().__init__(transform = transform, device = device)
-        self.c = c.to(device)
-        self.k = k.to(device)
+    def __init__(self, c, k, transform=None,
+                 c_grad = False,
+                 k_grad = False):
+
+        super().__init__(transform = transform)
+
+        self.c = nn.Parameter(torch.tensor(c), requires_grad=c_grad)
+        self.k = nn.Parameter(torch.tensor(k), requires_grad=k_grad)
 
     def _get_coeffs(self, local_pos, local_dir):
         """
@@ -302,6 +308,7 @@ class Quadric(Surface):
         return [t1, t2]
 
     def _solve_t(self, local_pos, local_dir):
+
         A, B, C = self._get_coeffs(local_pos, local_dir)
 
         t_list = self._solve_quadratic(A, B, C)

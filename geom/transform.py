@@ -1,7 +1,9 @@
 import torch
+import torch.nn as nn
+
 class RayTransform(nn.Module):
 
-    def __init__(self, rotation=None, translation=None, device='cpu', dtype=torch.float32,
+    def __init__(self, rotation=None, translation=None, dtype=torch.float32,
                  trans_grad = False, trans_mask = None,
                  rot_grad = False, rot_mask = None):
         """
@@ -11,7 +13,6 @@ class RayTransform(nn.Module):
             device: 'cpu' or 'cuda'.
         """
         super().__init__()
-        self._device = device
         self._dtype = dtype
 
         # Initialize Translation

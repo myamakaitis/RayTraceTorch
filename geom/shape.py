@@ -1,34 +1,23 @@
 import torch
+import torch.nn as nn
 from .primitives import Plane
 from .transform import RayTransform, eulerToRotMat
 
-class Shape:
+class Shape(nn.Module):
     """
     Base class for 3D volumetric shapes.
     Defines the volume 'inside' a set of boundaries.
     """
-    def __init__(self, transform = None, device='cpu'):
-        self.device = device
-        self.surfaces = [] # List of Surface objects defining the boundary
+    def __init__(self, transform = None):
+
+        super().__init__()
+
+        self.surfaces = nn.ModuleList() # List of Surface objects defining the boundary
 
         if transform is None:
-            self.transform = RayTransform(device=device)
+            self.transform = RayTransform()
         else:
             self.transform = transform
-
-    def to(self, device):
-        self.device = device
-        # Move any internal tensors (radius, etc.) in child classes
-        for attr, val in self.__dict__.items():
-            if isinstance(val, torch.Tensor):
-                setattr(self, attr, val.to(device))
-
-        for s in self.surfaces:
-            s.to(device)
-
-        self.transform.to(device)
-
-        return self
 
     def intersectTest(self, rays):
         """
@@ -114,13 +103,22 @@ class Shape:
 
 class CvxPolyhedron(Shape):
 
-    def __init__(self, planes_list, transform=None, device='cpu'):
+    def __init__(self, planes_list = None, transform=None):
 
-        super().__init__(transform=transform, device=device)
+        super().__init__(transform=transform)
 
-        self.PlaneRotMat = torch.stack([plane.transform.rot[2, :] for plane in planes_list])
-        self.PlaneTrans = torch.stack([plane.transform.trans for plane in planes_list])
-        self.surfaces = planes_list
+        if planes_list is not None:
+            planes_list = nn.ModuleList()
+        else:
+            self.surfaces.append(*planes_list)
+
+    @property
+    def PlaneRotMat(self):
+        return torch.stack([plane.transform.rot[2, :] for plane in planes_list])
+
+    @property
+    def PlaneTrans(self):
+        return torch.stack([plane.transform.trans for plane in planes_list])
 
     def inBounds(self, local_pos, surf_idx = None):
 
@@ -140,26 +138,35 @@ class Box(CvxPolyhedron):
     A rectangular prism defined by 6 Plane surfaces.
     """
 
-    def __init__(self, length, width, height, transform=None, device='cpu'):
+    def __init__(self, length, width, height, transform=None,
+                 l_grad = False, w_grad = False, h_grad = False):
 
-        self.device = device
-        self.length = length.to(device)
-        self.width = width.to(device)
-        self.height = height.to(device)
+        super().__init__(transform=transform)
 
-        planes = self._build_surfaces()
+        planes = self._build_surfaces(length, width, height, l_grad, w_grad, h_grad)
 
-        super().__init__(planes_list = planes, transform=transform, device=device)
+        self.surfaces.append(*planes)
 
-    def _build_surfaces(self):
+
+    @property
+    def length(self):
+        return surfaces[0].transform.trans[2] - surfaces[1].transform.trans[2]
+
+    @property
+    def width(self):
+        return surfaces[2].transform.trans[0] - surfaces[3].transform.trans[0]
+
+    @property
+    def height(self):
+        return surfaces[4].transform.trans[1] - surfaces[5].transform.trans[1]
+
+    def _build_surfaces(self, length, width, height):
         """
         Generates 6 infinite planes oriented to form the box faces.
         """
 
-        surfaces = []
-
         # Helper to create a plane with specific position and rotation
-        def make_plane(pos, rot_angles):
+        def make_plane(pos, rot_vec):
             # rot_angles: [x_deg, y_deg, z_deg]
             # Convert to radians for RayTransform (assuming it takes radians or has a helper)
             # Here assuming RayTransform takes translation and rotation matrix/Euler
@@ -171,10 +178,9 @@ class Box(CvxPolyhedron):
             # Assuming RayTransform(translation=..., rotation=...)
 
             # For simplicity, we define the 6 faces relative to Global.
-            Rmat = eulerToRotMat(torch.tensor(rot_angles)).squeeze()
 
             t = RayTransform(translation=torch.tensor(pos, device=self.device),
-                             rotation=torch.tensor(Rmat, device=self.device))
+                             rotation=torch.tensor(rot_vec, device=self.device))
             return Plane(transform=t, device=self.device)
 
         # 1. Front (+Z face)
@@ -202,3 +208,4 @@ class Box(CvxPolyhedron):
         surfaces.append(make_plane([0, 0 - self.height/2, 0], [-torch.pi / 2, 0.0, 0.0]))
 
         return surfaces
+
