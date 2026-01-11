@@ -16,7 +16,7 @@ class Surface(nn.Module):
         super().__init__()
 
         if transform is None:
-            self.transform = RayTransform(device=device)
+            self.transform = RayTransform()
         else:
             self.transform = transform
 
@@ -109,11 +109,10 @@ class Plane(Surface):
         oz = local_pos[:, 2]
         dz = local_dir[:, 2]
 
-        # Epsilon for stability (avoid div by zero for parallel rays)
-        epsilon = 1e-8
-        safe_dz = torch.where(torch.abs(dz) < epsilon, torch.tensor(epsilon, device=self.device), dz)
+        safe_dz = torch.where(torch.abs(dz) < epsilon, 1e-8, dz)
 
         t = -oz / safe_dz
+        
         return [t]
 
     def _getNormal(self, local_pos):
@@ -132,9 +131,9 @@ class Sphere(Surface):
     though for a pure Sphere class, R is often more intuitive.
     Here we stick to Radius R as a parameter for explicit Spheres.
     """
-    def __init__(self, radius, transform=None):
+    def __init__(self, radius, radius_grad = False, transform=None):
         super().__init__(transform=transform)
-        self.radius = torch.nn.Parameter(torch.tensor(radius, device=self.device))
+        self.radius = torch.nn.Parameter(torch.tensor(radius), requires_grad=radius_grad)
 
     def _solve_t(self, local_pos, local_dir):
         # |O + td|^2 = R^2

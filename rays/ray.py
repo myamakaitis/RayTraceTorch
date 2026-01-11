@@ -105,7 +105,7 @@ class Rays:
         self.intensity = self.intensity.to(device)
         return self
 
-    def update(self, new_pos, new_dir, intensity_mod):
+    def update(self, new_pos, new_dir, intensity_mult):
         """
         Updates ray state.
         Note: STRICT avoidance of in-place operations (+=) to preserve Autograd.
@@ -118,7 +118,7 @@ class Rays:
         self.pos = new_pos
         self.dir = F.normalize(new_dir, p=2, dim=1)
 
-        self.intensity = self.intensity*intensity_mod
+        self.intensity = self.intensity*intensity_mult
 
     def __repr__(self):
         return f"<Rays N={self.N}, device={self.device}>"
@@ -196,12 +196,12 @@ class Paths(Rays):
         self.dir_hist = [self.dir.clone().detach()]
         self.intensity_hist = [self.intensity.clone().detach()]
 
-    def update(self, new_pos, new_dir):
+    def update(self, new_pos, new_dir, intensity_mult):
         """
         Updates position and appends to history.
         """
         # Call the parent update to handle state change
-        super().update(new_pos, new_dir)
+        super().update(new_pos, new_dir, intensity_mult)
 
         # Append new position to history (detached for viz efficiency)
         self.pos_hist.append(self.pos.clone().detach())
@@ -223,6 +223,12 @@ class Paths(Rays):
         with torch.no_grad():
             pos_hist = self.get_pos_hist()
 
-            dir_finite_diff = pos_hist[:]
-            dir_hist = self.get_dir_hist()
+            dir_finite_diff = pos_hist[1:, :] - pos_hist[:-1, :]
+            dir_finite_diff = F.normalize(dir_finite_diff, p=2, dim=2)
+
+            dir_hist = self.get_dir_hist()[:-1]
+
+        return torch.allclose(dir_finite_diff, dir_hist)
+
+
 

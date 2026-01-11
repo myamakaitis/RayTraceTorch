@@ -1,13 +1,14 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
-class SurfaceFunction:
+class SurfaceFunction(nn.Module):
     """
     Base class for optical surface physics.
     Acts as a functor: instantiated with parameters, then called on ray batches.
     """
-    def __init__(self, device='cpu'):
-        self.device = device
+    def __init__(self):
+        super().__init__()
 
     def __call__(self, local_intersect, ray_dir, normal, **kwargs):
         """
@@ -26,14 +27,6 @@ class SurfaceFunction:
         """
         raise NotImplementedError
 
-    def to(self, device):
-        self.device = device
-        # Move any tensor attributes to device
-        for key, val in self.__dict__.items():
-            if isinstance(val, torch.Tensor):
-                setattr(self, key, val.to(device))
-        return self
-
 
 class Reflect(SurfaceFunction):
     """
@@ -50,7 +43,7 @@ class Reflect(SurfaceFunction):
         # Note: This assumes 'normal' is normalized.
         reflect_dir = ray_dir - 2 * cos_theta * normal
 
-        intensity_mod = torch.ones(ray_dir.shape[0], dtype=torch.float32, device=self.device)
+        intensity_mod = torch.ones_like(ray_dir[:, 0])
 
         return reflect_dir, intensity_mod
 
@@ -62,16 +55,18 @@ class RefractSnell(SurfaceFunction):
     the ray is reflected instead of refracted.
     """
 
-    def __init__(self, n_in, n_out, device='cpu'):
-        super().__init__(device)
-        self.n_in = torch.tensor(n_in, dtype=torch.float32, device=device)
-        self.n_out = torch.tensor(n_out, dtype=torch.float32, device=device)
-        self.mu = self.n_in / self.n_out
+    def __init__(self, n_in, n_out):
+        super().__init__()
+        self.n_in = torch.nn.Parameter(torch.tensor(n_in))
+        self.n_out = torch.nn.Parameter(torch.tensor(n_out))
 
     def __call__(self, local_intersect, ray_dir, normal, **kwargs):
         # 1. Orientation Check
         # Calculate dot product (cos theta_in)
         # ray_dir and normal should be normalized.
+
+        mu = self.n_in / self.n_out
+
         dot = torch.sum(ray_dir * normal, dim=1, keepdim=True)
 
         # Standardize Normal:
@@ -88,7 +83,7 @@ class RefractSnell(SurfaceFunction):
         # 2. Snell's Law Discriminant
         # term = 1 - mu^2 * (1 - cos^2(theta_1))
         # If term < 0, we have TIR.
-        term_sq = 1.0 - self.mu ** 2 * (1.0 - c1 ** 2)
+        term_sq = 1.0 - mu ** 2 * (1.0 - c1 ** 2)
 
         # Create TIR Mask
         tir_mask = term_sq < 0
@@ -98,7 +93,7 @@ class RefractSnell(SurfaceFunction):
         c2 = torch.sqrt(torch.relu(term_sq))
 
         # Vector Snell's Law: V_out = mu*I + (mu*c1 - c2)*N
-        v_refract = self.mu * ray_dir + (self.mu * c1 - c2) * n_eff
+        v_refract = mu * ray_dir + (mu * c1 - c2) * n_eff
 
         # --- BRANCH B: REFLECTION (Where term_sq < 0) ---
         # Formula: R = I - 2(I . N)N
@@ -115,7 +110,7 @@ class RefractSnell(SurfaceFunction):
         # Normalize to prevent drift
         out_dir = F.normalize(out_dir, p=2, dim=1)
 
-        intensity_mod = torch.ones(ray_dir.shape[0], dtype=torch.float32, device=self.device)
+        intensity_mod = torch.ones_like(ray_dir[:, 0])
 
         return out_dir, intensity_mod
 
@@ -132,17 +127,17 @@ class RefractFresnel(SurfaceFunction):
     - Grazing angles -> Higher probability of reflection.
     """
 
-    def __init__(self, n_in, n_out, device='cpu'):
-        super().__init__(device)
+    def __init__(self, n_in, n_out):
+        super().__init__()
         self.n_in = torch.tensor(n_in, dtype=torch.float32, device=device)
         self.n_out = torch.tensor(n_out, dtype=torch.float32, device=device)
-        self.mu = self.n_in / self.n_out
 
     def _fresnel_reflectance(self, cos_i, cos_t):
         """
         Computes Fresnel Reflectance R for unpolarized light.
         R = 0.5 * (Rs + Rp)
         """
+
         # Rs (s-polarized): Perpendicular
         # (n1 cos_i - n2 cos_t) / (n1 cos_i + n2 cos_t)
         n1_ci = self.n_in * cos_i
@@ -174,7 +169,8 @@ class RefractFresnel(SurfaceFunction):
         # 2. Compute Refraction Angle (Snell's Law)
         # sin^2(t) = mu^2 * sin^2(i)
         # sin^2(i) = 1 - cos^2(i)
-        sin2_t = (self.mu ** 2) * (1.0 - cos_i ** 2)
+        mu = self.n_in / self.n_out
+        sin2_t = (mu ** 2) * (1.0 - cos_i ** 2)
 
         # Check TIR
         is_tir = sin2_t > 1.0
@@ -208,13 +204,13 @@ class RefractFresnel(SurfaceFunction):
         v_reflect = ray_dir - 2 * dot * normal
 
         # B. Refraction Vector: mu*I + (mu*cos_i - cos_t)*N_eff
-        v_refract = self.mu * ray_dir + (self.mu * cos_i - cos_t) * n_eff
+        v_refract = mu * ray_dir + (mu * cos_i - cos_t) * n_eff
 
         # 6. Select Output
         out_dir = torch.where(reflect_mask, v_reflect, v_refract)
         out_dir = F.normalize(out_dir, p=2, dim=1)
 
-        intensity_mod = torch.ones(ray_dir.shape[0], dtype=torch.float32, device=self.device)
+        intensity_mod = torch.ones_like(ray_dir[:, 0])
 
         return out_dir, intensity_mod
 
@@ -230,7 +226,7 @@ class Transmit(SurfaceFunction):
 
         # 2. Intensity: 1.0 (No loss)
         # Create a tensor of 1s matching the batch size [N]
-        intensity_mod = torch.ones(ray_dir.shape[0], dtype=torch.float32, device=self.device)
+        intensity_mod = torch.ones_like(ray_dir[:, 0])
 
         return out_dir, intensity_mod
 
@@ -249,6 +245,6 @@ class Block(SurfaceFunction):
         out_dir = torch.zeros_like(ray_dir)
 
         # 2. Intensity: 0.0 (Fully absorbed)
-        intensity_mod = torch.zeros(ray_dir.shape[0], dtype=torch.float32, device=self.device)
+        intensity_mod = torch.zeros_like(ray_dir[:, 0])
 
         return out_dir, intensity_mod
