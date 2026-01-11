@@ -69,8 +69,8 @@ class Rectangle(Plane, SurfaceBounded):
 
     def __init__(self, half_x, half_y, device='cpu'):
         super().__init__(device)
-        self.hx = torch.tensor(half_x, dtype=torch.float32, device=device)
-        self.hy = torch.tensor(half_y, dtype=torch.float32, device=device)
+        self.hx = half_x.to_device(self.device)
+        self.hy = half_y.to_device(self.device)
 
     def inBounds(self, local_pos):
         # |x| <= hx  AND  |y| <= hy

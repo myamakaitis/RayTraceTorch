@@ -9,7 +9,7 @@ class SurfaceFunction:
     def __init__(self, device='cpu'):
         self.device = device
 
-    def __call__(self, intersect, ray_dir, normal, **kwargs):
+    def __call__(self, local_intersect, ray_dir, normal, **kwargs):
         """
         Apply surface physics to incoming rays.
 
@@ -41,7 +41,7 @@ class Reflect(SurfaceFunction):
     Formula: R = I - 2(I . N)N
     """
 
-    def __call__(self, intersect, ray_dir, normal, **kwargs):
+    def __call__(self, local_intersect, ray_dir, normal, **kwargs):
         # 1. Cosine of incident angle
         # Dot product: (N,3) * (N,3) -> (N,1)
         cos_theta = torch.sum(ray_dir * normal, dim=1, keepdim=True)
@@ -68,7 +68,7 @@ class RefractSnell(SurfaceFunction):
         self.n_out = torch.tensor(n_out, dtype=torch.float32, device=device)
         self.mu = self.n_in / self.n_out
 
-    def __call__(self, intersect, ray_dir, normal, **kwargs):
+    def __call__(self, local_intersect, ray_dir, normal, **kwargs):
         # 1. Orientation Check
         # Calculate dot product (cos theta_in)
         # ray_dir and normal should be normalized.
@@ -161,7 +161,7 @@ class RefractFresnel(SurfaceFunction):
 
         return 0.5 * (rs + rp)
 
-    def __call__(self, intersect, ray_dir, normal, **kwargs):
+    def __call__(self, local_intersect, ray_dir, normal, **kwargs):
         # 1. Geometry Setup
         # dot < 0: Entering (cos_i > 0). dot > 0: Exiting.
         dot = torch.sum(ray_dir * normal, dim=1, keepdim=True)
@@ -224,7 +224,7 @@ class Transmit(SurfaceFunction):
     The ray continues with no change in direction or intensity.
     Used for 'dummy' surfaces or internal check planes.
     """
-    def __call__(self, intersect, ray_dir, normal, **kwargs):
+    def __call__(self, local_intersect, ray_dir, normal, **kwargs):
         # 1. Direction: Unchanged
         out_dir = ray_dir
 

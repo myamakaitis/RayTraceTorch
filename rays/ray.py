@@ -105,7 +105,7 @@ class Rays:
         self.intensity = self.intensity.to(device)
         return self
 
-    def update(self, new_pos, new_dir):
+    def update(self, new_pos, new_dir, intensity_mod):
         """
         Updates ray state.
         Note: STRICT avoidance of in-place operations (+=) to preserve Autograd.
@@ -117,6 +117,8 @@ class Rays:
 
         self.pos = new_pos
         self.dir = F.normalize(new_dir, p=2, dim=1)
+
+        self.intensity = self.intensity*intensity_mod
 
     def __repr__(self):
         return f"<Rays N={self.N}, device={self.device}>"
@@ -190,7 +192,9 @@ class Paths(Rays):
         # History is a list of tensors to avoid constant concatenation overhead
         # We detach() history for plotting to save memory, as we usually
         # don't need gradients for the visualization path itself.
-        self.history = [self.pos.clone().detach()]
+        self.pos_hist = [self.pos.clone().detach()]
+        self.dir_hist = [self.dir.clone().detach()]
+        self.intensity_hist = [self.intensity.clone().detach()]
 
     def update(self, new_pos, new_dir):
         """
@@ -200,8 +204,25 @@ class Paths(Rays):
         super().update(new_pos, new_dir)
 
         # Append new position to history (detached for viz efficiency)
-        self.history.append(self.pos.clone().detach())
+        self.pos_hist.append(self.pos.clone().detach())
+        self.dir_hist.append(self.dir.clone().detach())
+        self.intensity_hist.append(self.intensity.clone().detach())
 
-    def get_history(self):
+    def get_pos_hist(self):
         """Returns the ray paths as a Tensor of shape [Steps, N, 3]"""
-        return torch.stack(self.history, dim=0)
+        return torch.stack(self.pos_hist)
+
+    def get_dir_hist(self):
+        return torch.stack(self.dir_hist)
+
+    def get_intensity_hist(self):
+        return torch.stack(self.intensity_hist)
+
+    def test_history_consistency(self):
+
+        with torch.no_grad():
+            pos_hist = self.get_pos_hist()
+
+            dir_finite_diff = pos_hist[:]
+            dir_hist = self.get_dir_hist()
+

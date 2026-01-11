@@ -2,7 +2,7 @@ import torch
 from .transform import RayTransform
 
 
-class Surface:
+class Surface(nn.Module):
     """
     Base class for all optical surfaces.
     Implements the dual-method intersection protocol:
@@ -11,21 +11,13 @@ class Surface:
     """
 
     def __init__(self, transform=None, device='cpu'):
+
+        super().__init__()
         self.device = device
         if transform is None:
             self.transform = RayTransform(device=device)
         else:
             self.transform = transform
-
-    def to(self, device):
-        self.device = device
-        # Move any internal tensors (radius, etc.) in child classes
-        for attr, val in self.__dict__.items():
-            if isinstance(val, torch.Tensor):
-                setattr(self, attr, val.to(device))
-
-        self.transform = self.transform.to(device)
-        return self
 
     def _check_t(self, t_list, *args):
 
@@ -58,7 +50,7 @@ class Surface:
 
         return t
 
-    def intersect(self, rays):
+    def intersectSurface(self, rays, *args):
         """
         Performs a full intersection calculation tracking gradients.
 
