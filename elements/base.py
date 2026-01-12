@@ -3,7 +3,7 @@ import torch.nn as nn
 from typing import List, Union
 
 from ..geom.shape import Shape
-from ..phys.base import SurfaceFunction
+from ..phys.phys_std import SurfaceFunction
 
 
 class Element(nn.Module):

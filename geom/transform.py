@@ -17,7 +17,7 @@ class RayTransform(nn.Module):
 
         # Initialize Translation
         if translation is not None:
-            self.trans = torch.nn.Parameter(translation, requires_grad=trans_grad)
+            self.trans = torch.nn.Parameter(torch.as_tensor(translation), requires_grad=trans_grad)
         else:
             self.trans = torch.nn.Parameter(torch.zeros(3, dtype=dtype), requires_grad=trans_grad)
 
@@ -31,7 +31,7 @@ class RayTransform(nn.Module):
 
         # Initialize Rotation
         if rotation is not None:
-            self.rot_vec = torch.nn.Parameter(rotation, requires_grad=rot_grad)
+            self.rot_vec = torch.nn.Parameter(torch.as_tensor(rotation), requires_grad=rot_grad)
         else:
             self.rot_vec = torch.nn.Parameter(torch.zeros(3, requires_grad=rot_grad))
 

@@ -94,7 +94,7 @@ class Shape(nn.Module):
 
         return t, hit_point, global_normal
 
-    def inBounds(self, local_pos, surf_idx=None):
+    def inBounds(self, local_pos, surf_idx):
         """
         Checks if global points 'pos' [N, 3] are inside the volume.
         Must be implemented by children.
@@ -120,7 +120,7 @@ class CvxPolyhedron(Shape):
     def PlaneTrans(self):
         return torch.stack([plane.transform.trans for plane in planes_list])
 
-    def inBounds(self, local_pos, surf_idx = None):
+    def inBounds(self, local_pos, surf_idx):
 
         local_pos_trans = local_pos[None, :, :] - self.PlaneTrans[:, None, :]
         local_z = torch.sum(self.PlaneRotMat[:, None, :] * local_pos_trans, dim=-1)

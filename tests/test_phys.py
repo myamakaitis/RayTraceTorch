@@ -5,10 +5,10 @@ def test_tir_logic():
     device = 'cpu'
     # Glass (1.5) -> Air (1.0)
     # Critical angle is approx 41.8 degrees.
-    refract_op = RefractSnell(n_in=1.5, n_out=1.0, device=device)
+    refract_op = RefractSnell(n_in=1.5, n_out=1.0)
 
     # Normal points +Y (0, 1, 0)
-    normal = torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]], device=device)
+    normal = torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
 
     # Ray 1: Shallow angle (30 deg to normal) -> Should Refract
     # Ray 2: Steep angle (60 deg to normal) -> Should Reflect (TIR)
@@ -19,7 +19,7 @@ def test_tir_logic():
     ray_dir = torch.tensor([
         [0.5, 0.866025, 0.0],  # Ray 1
         [0.866025, 0.5, 0.0]  # Ray 2
-    ], device=device)
+    ])
 
     out, _ = refract_op(None, ray_dir, normal)
 
@@ -42,12 +42,12 @@ def test_fresnel_probability():
     device = 'cpu'
     # Air -> Glass (n=1.5)
     # Normal incidence R = ((1-1.5)/(1+1.5))^2 = (-0.5/2.5)^2 = 0.2^2 = 0.04 (4%)
-    refract_op = RefractFresnel(n_in=1.0, n_out=1.5, device=device)
+    refract_op = RefractFresnel(n_in=1.0, n_out=1.5)
 
     # 1. Create a large batch of identical rays for statistics
     N = 10000
-    ray_dir = torch.tensor([[0.0, 0.0, 1.0]], device=device).repeat(N, 1)  # +Z
-    normal = torch.tensor([[0.0, 0.0, -1.0]], device=device).repeat(N, 1)  # -Z (opposing)
+    ray_dir = torch.tensor([[0.0, 0.0, 1.0]]).repeat(N, 1)  # +Z
+    normal = torch.tensor([[0.0, 0.0, -1.0]]).repeat(N, 1)  # -Z (opposing)
 
     # 2. Run Physics
     out_dir, _ = refract_op(None, ray_dir, normal)
@@ -74,13 +74,13 @@ def test_tir_deterministic():
     device = 'cpu'
     # Glass (1.5) -> Air (1.0)
     # Critical Angle ~41.8 deg.
-    refract_op = RefractFresnel(n_in=1.5, n_out=1.0, device=device)
+    refract_op = RefractFresnel(n_in=1.5, n_out=1.0)
 
     # Incidence at 60 deg (Steep) -> 100% TIR
     # Ray (sin60, cos60) against Normal (0,1)
     N = 100
-    ray_dir = torch.tensor([[0.866, 0.5, 0.0]], device=device).repeat(N, 1)
-    normal = torch.tensor([[0.0, 1.0, 0.0]], device=device).repeat(N, 1)
+    ray_dir = torch.tensor([[0.866, 0.5, 0.0]]).repeat(N, 1)
+    normal = torch.tensor([[0.0, 1.0, 0.0]]).repeat(N, 1)
 
     out_dir, _ = refract_op(None, ray_dir, normal)
 
@@ -93,22 +93,20 @@ def test_tir_deterministic():
 
 
 def test_transmit_block():
-    device = 'cpu'
-
     # 1. Setup
     N = 5
-    ray_dir = torch.randn(N, 3, device=device)
-    normal = torch.randn(N, 3, device=device)  # Irrelevant for these physics
+    ray_dir = torch.randn(N, 3)
+    normal = torch.randn(N, 3)  # Irrelevant for these physics
 
     # 2. Test Transmit
-    transmit_op = Transmit(device=device)
+    transmit_op = Transmit()
     out_dir, intensity = transmit_op(None, ray_dir, normal)
 
     assert torch.allclose(out_dir, ray_dir), "Transmit changed ray direction"
     assert torch.allclose(intensity, torch.ones(N)), "Transmit altered intensity"
 
     # 3. Test Block
-    block_op = Block(device=device)
+    block_op = Block()
     out_dir, intensity = block_op(None, ray_dir, normal)
 
     # Check Intensity is 0

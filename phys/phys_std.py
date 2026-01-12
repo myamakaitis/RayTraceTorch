@@ -57,8 +57,8 @@ class RefractSnell(SurfaceFunction):
 
     def __init__(self, n_in, n_out):
         super().__init__()
-        self.n_in = torch.nn.Parameter(torch.tensor(n_in))
-        self.n_out = torch.nn.Parameter(torch.tensor(n_out))
+        self.n_in = nn.Parameter(torch.tensor(n_in))
+        self.n_out = nn.Parameter(torch.tensor(n_out))
 
     def forward(self, local_intersect, ray_dir, normal, **kwargs):
         # 1. Orientation Check
@@ -129,8 +129,8 @@ class RefractFresnel(SurfaceFunction):
 
     def __init__(self, n_in, n_out):
         super().__init__()
-        self.n_in = torch.tensor(n_in, dtype=torch.float32, device=device)
-        self.n_out = torch.tensor(n_out, dtype=torch.float32, device=device)
+        self.n_in = nn.Parameter(torch.tensor(n_in, dtype=torch.float32))
+        self.n_out = nn.Parameter(torch.tensor(n_out, dtype=torch.float32))
 
     def _fresnel_reflectance(self, cos_i, cos_t):
         """
@@ -186,7 +186,7 @@ class RefractFresnel(SurfaceFunction):
         # Full tensor computation (safe because we use where later)
         # The calculation might produce garbage for TIR indices, but we filter them.
         r_full = self._fresnel_reflectance(cos_i, cos_t)
-        R = torch.where(is_tir, torch.tensor(1.0, device=self.device), r_full)
+        R = torch.where(is_tir, torch.as_tensor(1.0), r_full)
 
         # 4. Stochastic Decision (Monte Carlo)
         # Generate random values [0, 1)

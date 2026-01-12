@@ -8,10 +8,9 @@ class SurfaceBounded(Surface):
     Base class for bounded surfaces
     """
 
-    def __init__(self, device='cpu', transform=None, invert=False):
+    def __init__(self, transform=None, invert=False):
 
-        super().__init__(transform=transform, device=device)
-        self.device = device
+        super().__init__(transform=transform)
         self.surface = None
         self.invert = invert
 
@@ -51,9 +50,9 @@ class Disk(Plane, SurfaceBounded):
     Circular aperture defined by a radius.
     """
 
-    def __init__(self, radius, transform = None, device='cpu', ):
-        super().__init__(device)
-        self.radius = torch.tensor(radius, dtype=torch.float32, device=device)
+    def __init__(self, radius, transform = None):
+        super().__init__()
+        self.radius = torch.tensor(radius, dtype=torch.float32)
 
     def inBounds(self, local_pos):
         # r^2 = x^2 + y^2
@@ -67,10 +66,10 @@ class Rectangle(Plane, SurfaceBounded):
     Rectangular aperture defined by half-widths in X and Y.
     """
 
-    def __init__(self, half_x, half_y, device='cpu'):
-        super().__init__(device)
-        self.hx = half_x.to_device(self.device)
-        self.hy = half_y.to_device(self.device)
+    def __init__(self, half_x, half_y):
+        super().__init__()
+        self.hx = nn.Parameter(torch.as_tensor(half_x, dtype=torch.float32))
+        self.hy = nn.Parameter(torch.as_tensor(half_y, dtype=torch.float32))
 
     def inBounds(self, local_pos):
         # |x| <= hx  AND  |y| <= hy
@@ -85,11 +84,12 @@ class Ellipse(Plane, SurfaceBounded):
     Elliptical aperture defined by semi-axes X and Y.
     """
 
-    def __init__(self, r_major, r_minor, rot, device='cpu'):
-        super().__init__(device)
-        self.r_minor = r_minor.to(device)
-        self.r_major = r_major.to(device)
-        self.rot = rot.to(device)
+    def __init__(self, r_major, r_minor, rot,
+                       r_major_grad = False, r_minor_grad = False, rot_grad = False):
+        super().__init__()
+        self.r_minor = nn.Parameter(torch.as_tensor(r_minor), requires_grad=r_minor_grad)
+        self.r_major = nn.Parameter(torch.as_tensor(r_major), requires_grad=r_major_grad)
+        self.rot = nn.Parameter(torch.as_tensor(rot), requires_grad=rot_grad)
 
     def inBounds(self, local_pos):
         # (x/rx)^2 + (y/ry)^2 <= 1
@@ -113,11 +113,23 @@ class HalfSphere(Quadric, SurfaceBounded):
     R < 0 (Convex Back): Center is to Left. Valid surface is Right of Center (Z > 0).
     """
 
-    def __init__(self, curvature, transform=None, device='cpu'):
-        super().__init__(c = curvature, k = torch.tensor(0.0, dtype=curvature.dtype), transform=transform, device=device)
+    def __init__(self, curvature, curvature_grad, transform=None):
+        super().__init__(c = curvature, c_grad=curvature_grad, k = 0.0, k_grad=False, transform=transform)
 
     def inBounds(self, local_pos):
         # Check: sign(z) != sign(R)
         # Equivalent to: z * R < 0
         z = local_pos[:, 2]
         return torch.abs(z * self.c) < 1.001
+
+    def sagittalZ(self, radius):
+        """Calculates Z-coordinate of the surface edge relative to vertex Z."""
+        r_sq = (radius / 2.0) ** 2
+
+        # Sag equation for vertex formulation
+        term = 1.0 - self.c ** 2 * r_sq
+        term = torch.relu(term)
+        denom = 1.0 + torch.sqrt(term)
+
+        sag = (self.c * r_sq) / denom
+        return sag + self.transform.trans[2]

@@ -242,8 +242,7 @@ class Quadric(Surface):
     """
 
     def __init__(self, c, k, transform=None,
-                 c_grad = False,
-                 k_grad = False):
+                 c_grad = False, k_grad = False):
 
         super().__init__(transform = transform)
 
