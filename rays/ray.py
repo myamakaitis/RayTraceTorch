@@ -21,7 +21,8 @@ class Rays:
                  intensities=None,
                  n_medium=1.0,
                  ray_id=0,
-                 device='cpu'):
+                 device='cpu',
+                 dtype=torch.float32):
         """
         Args:
             origins: Array-like [N, 3] or [3] starting points.
@@ -34,8 +35,8 @@ class Rays:
         self.device = device
 
         # Ensure inputs are Float Tensors [N, 3]
-        self.pos = torch.as_tensor(origins, dtype=torch.float32, device=device)
-        self.dir = torch.as_tensor(directions, dtype=torch.float32, device=device)
+        self.pos = torch.as_tensor(origins, dtype=dtype, device=device)
+        self.dir = torch.as_tensor(directions, dtype=dtype, device=device)
 
         # Handle single ray input broadcasting
         if self.pos.ndim == 1: self.pos = self.pos.unsqueeze(0)
@@ -49,14 +50,14 @@ class Rays:
 
         # Initialize Metadata
         # Refractive index is tracked per ray
-        self.n = torch.full((self.N,), n_medium, dtype=torch.float32, device=device)
+        self.n = torch.full((self.N,), n_medium, dtype=dtype, device=device)
 
         # Optical properties
         if wavelengths is not None:
-            self.wavelength = torch.as_tensor(wavelengths, dtype=torch.float32, device=device)
+            self.wavelength = torch.as_tensor(wavelengths, dtype=dtype, device=device)
 
         if intensities is not None:
-            self.intensity = torch.as_tensor(intensities, dtype=torch.float32, device=device)
+            self.intensity = torch.as_tensor(intensities, dtype=dtype, device=device)
         else:
             self.intensity = torch.ones(self.N, device=device)
 
@@ -186,8 +187,8 @@ class Paths(Rays):
     Child of Rays that automatically logs position history for 3D visualization.
     """
 
-    def __init__(self, origins, directions, **kwargs):
-        super().__init__(origins, directions, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
         # History is a list of tensors to avoid constant concatenation overhead
         # We detach() history for plotting to save memory, as we usually

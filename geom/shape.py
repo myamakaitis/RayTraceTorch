@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .primitives import Plane
-from .transform import RayTransform, eulerToRotMat
+from .transform import RayTransform
 
 class Shape(nn.Module):
     """
@@ -12,6 +12,7 @@ class Shape(nn.Module):
 
         super().__init__()
 
+        self.epsilon = nn.Parameter(torch.as_tensor(1e-7), requires_grad=False)
         self.surfaces = nn.ModuleList() # List of Surface objects defining the boundary
 
         if transform is None:
@@ -108,17 +109,16 @@ class CvxPolyhedron(Shape):
         super().__init__(transform=transform)
 
         if planes_list is not None:
-            planes_list = nn.ModuleList()
-        else:
-            self.surfaces.append(*planes_list)
+            for s in planes_list:
+                self.surfaces.append(s)
 
     @property
     def PlaneRotMat(self):
-        return torch.stack([plane.transform.rot[2, :] for plane in planes_list])
+        return torch.stack([plane.transform.rot[2, :] for plane in self.surfaces])
 
     @property
     def PlaneTrans(self):
-        return torch.stack([plane.transform.trans for plane in planes_list])
+        return torch.stack([plane.transform.trans for plane in self.surfaces])
 
     def inBounds(self, local_pos, surf_idx):
 
@@ -143,10 +143,7 @@ class Box(CvxPolyhedron):
 
         super().__init__(transform=transform)
 
-        planes = self._build_surfaces(length, width, height, l_grad, w_grad, h_grad)
-
-        self.surfaces.append(*planes)
-
+        self._build_surfaces(length, width, height, l_grad, w_grad, h_grad)
 
     @property
     def length(self):
@@ -191,27 +188,24 @@ class Box(CvxPolyhedron):
 
         # 1. Front (+Z face)
         # Canonical Plane is XY facing +Z. We just translate it to +hz.
-        surfaces.append(make_plane([0, 0, 0 + length/2], [0.0, 0.0, 0.0], l_grad))
+        self.surfaces.append(make_plane([0, 0, 0 + length/2], [0.0, 0.0, 0.0], l_grad))
 
         # 2. Back (-Z face)
         # Rotate 180 Y so it faces -Z. Translate to -hz.
-        surfaces.append(make_plane([0, 0, 0 - length/2], [0.0, torch.pi, 0.0], l_grad))
+        self.surfaces.append(make_plane([0, 0, 0 - length/2], [0.0, torch.pi, 0.0], l_grad))
 
         # 3. Right (+X face)
         # Rotate +90 Y. Normal (0,0,1) -> (1,0,0). Translate to +hx.
-        surfaces.append(make_plane([0 + width/2, 0, 0], [0.0, -torch.pi / 2, 0.0], w_grad))
+        self.surfaces.append(make_plane([0 + width/2, 0, 0], [0.0, -torch.pi / 2, 0.0], w_grad))
 
         # 4. Left (-X face)
         # Rotate -90 Y. Normal (0,0,1) -> (-1,0,0). Translate to -hx.
-        surfaces.append(make_plane([0 - width/2, 0, 0], [0.0, torch.pi / 2, 0.0], w_grad))
+        self.surfaces.append(make_plane([0 - width/2, 0, 0], [0.0, torch.pi / 2, 0.0], w_grad))
 
         # 5. Top (+Y face)
         # Rotate -90 X. Normal (0,0,1) -> (0,1,0). Translate to +hy.
-        surfaces.append(make_plane([0, 0 + height/2, 0], [torch.pi / 2, 0.0, 0.0], h_grad))
+        self.surfaces.append(make_plane([0, 0 + height/2, 0], [torch.pi / 2, 0.0, 0.0], h_grad))
 
         # 6. Bottom (-Y face)
         # Rotate +90 X. Normal (0,0,1) -> (0,-1,0). Translate to -hy.
-        surfaces.append(make_plane([0, 0 - height/2, 0], [-torch.pi / 2, 0.0, 0.0], h_grad))
-
-        return surfaces
-
+        self.surfaces.append(make_plane([0, 0 - height/2, 0], [-torch.pi / 2, 0.0, 0.0], h_grad))

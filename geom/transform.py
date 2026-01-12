@@ -21,9 +21,9 @@ class RayTransform(nn.Module):
         else:
             self.trans = torch.nn.Parameter(torch.zeros(3, dtype=dtype), requires_grad=trans_grad)
 
-        if trans_mask is not None:
+        if trans_grad and (trans_mask is not None):
             # Register buffer so it moves to GPU/CPU automatically with the model
-            self.register_buffer('trans_mask', torch.as_tensor(trans_mask, dtype=dtype, device=device))
+            self.register_buffer('trans_mask', torch.as_tensor(trans_mask, dtype=dtype))
 
             # The Hook: Multiplies gradient by mask before optimizer sees it
             # We use self.trans_mask (the buffer) to ensure correct device
@@ -33,11 +33,11 @@ class RayTransform(nn.Module):
         if rotation is not None:
             self.rot_vec = torch.nn.Parameter(torch.as_tensor(rotation), requires_grad=rot_grad)
         else:
-            self.rot_vec = torch.nn.Parameter(torch.zeros(3, requires_grad=rot_grad))
+            self.rot_vec = torch.nn.Parameter(torch.zeros(3), requires_grad=rot_grad)
 
         # --- 4. Rotation Hook ---
-        if rot_mask is not None:
-            self.register_buffer('rot_mask', torch.as_tensor(rot_mask, dtype=dtype, device=device))
+        if rot_grad and (rot_mask is not None):
+            self.register_buffer('rot_mask', torch.as_tensor(rot_mask, dtype=dtype))
             self.rot_vec.register_hook(lambda grad: grad * self.rot_mask)
 
     def _compute_matrix(self):

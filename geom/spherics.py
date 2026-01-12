@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import math
 from .shape import Shape
 from .primitives import Cylinder, Plane
@@ -31,8 +32,8 @@ class Spheric(Shape):
 
         if surf_idx >= self.N_optical:
             # Edge Hit: Must be between the Z-planes of the lens edge
-            z1 = self.surfaces[surf_idx-self.N_optical].sagitalZ(self.radius)
-            z2 = self.surfaces[surf_idx-self.N_optical+1].sagitalZ(self.radius)
+            z1 = self.surfaces[surf_idx-self.N_optical].sagittalZ(self.radius)
+            z2 = self.surfaces[surf_idx-self.N_optical+1].sagittalZ(self.radius)
 
             return (z >= z1) & (z <= z2)
         else:
@@ -73,16 +74,18 @@ class Singlet(Spheric):
         super().__init__(transform=transform)
 
         self.N_optical = 2
-        radius = nn.Parameter(torch.as_tensor(D / 2.0), requires_grad=D_grad)
+        self.radius = nn.Parameter(torch.as_tensor(D / 2.0), requires_grad=D_grad)
 
         surf1 = self._make_surface(C1, -T/2, c_grad=C1_grad, z_grad=T_grad)
         surf2 = self._make_surface(C2, T/2, c_grad=C2_grad, z_grad=T_grad)
 
         # Edge (Cylinder)
-        edge = Cylinder(radius)
+        edge = Cylinder(D/2)
+        edge.radius = self.radius
 
         # Order MUST be [Front, Back, Edge] for inside() logic
-        self.surfaces.append(surf1, surf2, edge)
+        for surf in [surf1, surf2, edge]:
+            self.surfaces.append(surf)
 
         # Validation
         with torch.no_grad():
@@ -92,132 +95,197 @@ class Singlet(Spheric):
                 raise ValueError(f"|R2| must be larger than D/2")
             if self.T <= 1e-6:
                 raise ValueError("Thickness T must be positive")
-            z1 = surf1.sagittalZ(self.radius)
-            z2 = surf1.sagittalZ(self.radius)
+            z_e1 = surf1.sagittalZ(self.radius)
+            z_e2 = surf2.sagittalZ(self.radius)
 
-            if z1 > z2:
+            if z_e1 > z_e2:
                 raise ValueError("Intersecting optical surfaces")
 
     @property
-    def T:
-        return self.surfaces[self.N_optical-1].transform.trans[2] - self.surfaces[0].transform.trans[s]
+    def T(self):
+        return self.surfaces[self.N_optical-1].transform.trans[2] - self.surfaces[0].transform.trans[2]
 
 
 class Doublet(Spheric):
     """
-    A Cemented Doublet Lens with 3 Optical Surfaces and 2 Edge Surfaces.
+    A 3D Doublet Lens defined by three optical surfaces and two cylindrical edges.
+    The entire stack is centered at (0,0,0).
     """
 
     def __init__(self,
                  C1: float, C2: float, C3: float,
-                 T1: float, T2: float, D: float,
-                 c1_grad = True, c2_grad = True, c3_grad = True,
-                 t1_grad = True, t2_grad=True,
+                 D: float,
+                 T1: float, T2: float,
+                 C1_grad=True, C2_grad=True, C3_grad=True,
+                 D_grad=False,
+                 T1_grad=True, T2_grad=True,
                  transform=None):
-
+        """
+        Args:
+            C1, C2, C3: Curvatures of the 3 surfaces (Front, Middle, Back).
+            D: Diameter of the lens.
+            T1: Axial thickness of the first element (between C1 and C2).
+            T2: Axial thickness of the second element (between C2 and C3).
+        """
         super().__init__(transform=transform)
 
-        self.radius = nn.Parameter(torch.as_tensor(D / 2.0), requires_grad=False)
+        self.N_optical = 3
+        self.radius = nn.Parameter(torch.as_tensor(D / 2.0), requires_grad=D_grad)
 
-        # 1. Validation
-        with torch.no_grad():
-            for C, name in [(C1, 'R1'), (C2, 'R2'), (C3, 'R3')]:
-                if abs(0.5 * C) > 1 / D:
-                    raise ValueError(f"|{name}| must be larger than D")
-            if T1 <= 1e-6 or T2 <= 1e-6:
-                raise ValueError("Thicknesses T1 and T2 must be positive")
-
-        # 2. Vertices (Centered at Local Z=0)
+        # Calculate Z positions to center the triplet
+        # Total mechanical thickness
         T_total = T1 + T2
-        z_v1 = 0
-        z_v2 = z_v1 + T1
-        z_v3 = z_v2 + T2
 
-        # 3. Construct Optical Surfaces & Get Edge Bounds
-        # Note: z_e is the Z-coordinate where the surface intersects the cylinder of diameter D
-        self.surf1, z_e1 = self._make_surface(z_v1, self.C1, device)
-        self.surf2, z_e2 = self._make_surface(z_v2, self.C2, device)
-        self.surf3, z_e3 = self._make_surface(z_v3, self.C3, device)
+        # Z positions relative to the lens center (0,0,0)
+        # V1 is at -Total/2
+        z1 = -T_total / 2.0
+        z2 = z1 + T1
+        z3 = z2 + T2
 
-        # 4. Check Element Edge Thicknesses
+        # Create Optical Surfaces
+        # Note: We pass z_grad=True if the thickness determining this position has gradients enabled
+        surf1 = self._make_surface(C1, z1, c_grad=C1_grad, z_grad=(T1_grad or T2_grad))
+        surf2 = self._make_surface(C2, z2, c_grad=C2_grad, z_grad=(T1_grad or T2_grad))
+        surf3 = self._make_surface(C3, z3, c_grad=C3_grad, z_grad=(T1_grad or T2_grad))
+
+        # Create Edges (Cylinders)
+        # Edge 1 connects Surf 1 and Surf 2
+        edge1 = Cylinder(D / 2)
+        edge1.radius = self.radius
+
+        # Edge 2 connects Surf 2 and Surf 3
+        edge2 = Cylinder(D / 2)
+        edge2.radius = self.radius
+
+        # Order MUST be [Optical Surfaces ..., Edges ...] for the base inBounds() logic
+        optical_surfaces = [surf1, surf2, surf3]
+        edges = [edge1, edge2]
+
+        for s in optical_surfaces + edges:
+            self.surfaces.append(s)
+
+        # Validation
         with torch.no_grad():
-            if z_e1 >= z_e2: raise ValueError(f"Element 1 (Front) has negative edge thickness")
-            if z_e2 >= z_e3: raise ValueError(f"Element 2 (Back) has negative edge thickness")
+            curvatures = [C1, C2, C3]
+            thicknesses = [T1, T2]
 
-        # Store bounds for inside() checks
-        self.bounds = [
-            (z_e1, z_e2),  # Element 1 Range
-            (z_e2, z_e3)  # Element 2 Range
-        ]
+            # Check curvature constraints
+            for i, C in enumerate(curvatures):
+                if abs(0.5 * C) > 1 / D:
+                    raise ValueError(f"|R{i + 1}| must be larger than D/2")
 
-        # 5. Construct Separate Edge Surfaces
-        self.edge1 = Cylinder(self.half_D, device=device)
-        self.edge2 = Cylinder(self.half_D, device=device)
+            # Check thickness constraints
+            for i, T_val in enumerate(thicknesses):
+                if T_val <= 1e-6:
+                    raise ValueError(f"Thickness T{i + 1} must be positive")
 
-        # Surface Order: [Optical 1, Optical 2, Optical 3, Edge 1, Edge 2]
-        self.surfaces = [self.surf1, self.surf2, self.surf3, self.edge1, self.edge2]
+            # Check for intersection (crossing surfaces)
+            # We check if the sagittal Z of the next surface is physically after the previous one
+            z_sags = [s.sagittalZ(self.radius) for s in optical_surfaces]
+
+            if z_sags[0] > z_sags[1]:
+                raise ValueError("Optical surfaces 1 and 2 intersect")
+            if z_sags[1] > z_sags[2]:
+                raise ValueError("Optical surfaces 2 and 3 intersect")
+
+    @property
+    def T1(self):
+        """Thickness of the first element."""
+        return self.surfaces[1].transform.trans[2] - self.surfaces[0].transform.trans[2]
+
+    @property
+    def T2(self):
+        """Thickness of the second element."""
+        return self.surfaces[2].transform.trans[2] - self.surfaces[1].transform.trans[2]
 
 
-class Triplet(Lens):
+class Triplet(Spheric):
     """
-    A Cemented Triplet Lens with 4 Optical Surfaces and 3 Edge Surfaces.
+    A 3D Triplet Lens defined by four optical surfaces and three cylindrical edges.
+    The entire stack is centered at (0,0,0).
     """
 
     def __init__(self,
                  C1: float, C2: float, C3: float, C4: float,
-                 T1: float, T2: float, T3: float,
                  D: float,
-                 transform=None,
-                 device='cpu'):
+                 T1: float, T2: float, T3: float,
+                 C1_grad=True, C2_grad=True, C3_grad=True, C4_grad=True,
+                 D_grad=False,
+                 T1_grad=True, T2_grad=True, T3_grad=True,
+                 transform=None):
+        """
+        Args:
+            C1..C4: Curvatures of the 4 surfaces.
+            D: Diameter of the lens.
+            T1: Thickness between C1 and C2.
+            T2: Thickness between C2 and C3.
+            T3: Thickness between C3 and C4.
+        """
+        super().__init__(transform=transform)
 
-        super().__init__(transform, device)
+        self.N_optical = 4
+        self.radius = nn.Parameter(torch.as_tensor(D / 2.0), requires_grad=D_grad)
 
-        self.C1, self.C2 = C1.to(device), C2.to(device)
-        self.C3, self.C4 = C3.to(device), C4.to(device)
-        self.T1, self.T2, self.T3 = T1.to(device), T2.to(device), T3.to(device)
-        self.D = D.to(device)
-        self.half_D = self.D / 2.0
+        # Calculate Z positions to center the triplet
+        T_total = T1 + T2 + T3
 
-        # 1. Validation
+        # Determine if any thickness gradients affect position
+        any_T_grad = T1_grad or T2_grad or T3_grad
+
+        z1 = -T_total / 2.0
+        z2 = z1 + T1
+        z3 = z2 + T2
+        z4 = z3 + T3
+
+        # Create Optical Surfaces
+        surf1 = self._make_surface(C1, z1, c_grad=C1_grad, z_grad=any_T_grad)
+        surf2 = self._make_surface(C2, z2, c_grad=C2_grad, z_grad=any_T_grad)
+        surf3 = self._make_surface(C3, z3, c_grad=C3_grad, z_grad=any_T_grad)
+        surf4 = self._make_surface(C4, z4, c_grad=C4_grad, z_grad=any_T_grad)
+
+        # Create Edges
+        edges = []
+        for _ in range(3):
+            e = Cylinder(D / 2)
+            e.radius = self.radius
+            edges.append(e)
+
+        # Order MUST be [Optical Surfaces ..., Edges ...]
+        optical_surfaces = [surf1, surf2, surf3, surf4]
+
+        for s in optical_surfaces + edges:
+            self.surfaces.append(s)
+
+        # Validation
         with torch.no_grad():
-            for C, name in [(self.C1, 'R1'), (self.C2, 'R2'), (self.C3, 'R3')]:
-                if abs(0.5 * C.item()) > 1 / self.D.item():
-                    raise ValueError(f"|{name}| must be larger than D")
-            if any(t.item() <= 1e-6 for t in [self.T1, self.T2, self.T3]):
-                raise ValueError("Thicknesses must be positive")
+            curvatures = [C1, C2, C3, C4]
+            thicknesses = [T1, T2, T3]
 
-        # 2. Vertices
-        T_total = self.T1 + self.T2 + self.T3
-        z_v1 = -T_total / 2.0
-        z_v2 = z_v1 + self.T1
-        z_v3 = z_v2 + self.T2
-        z_v4 = z_v3 + self.T3
+            for i, C in enumerate(curvatures):
+                if abs(0.5 * C) > 1 / D:
+                    raise ValueError(f"|R{i + 1}| must be larger than D/2")
 
-        # 3. Optical Surfaces & Bounds
-        self.surf1, z_e1 = self._make_surface(z_v1, self.C1, device)
-        self.surf2, z_e2 = self._make_surface(z_v2, self.C2, device)
-        self.surf3, z_e3 = self._make_surface(z_v3, self.C3, device)
-        self.surf4, z_e4 = self._make_surface(z_v4, self.C4, device)
+            for i, T_val in enumerate(thicknesses):
+                if T_val <= 1e-6:
+                    raise ValueError(f"Thickness T{i + 1} must be positive")
 
-        # 4. Check Edge Thicknesses
-        with torch.no_grad():
-            if z_e1 >= z_e2: raise ValueError("Element 1 has negative edge thickness")
-            if z_e2 >= z_e3: raise ValueError("Element 2 has negative edge thickness")
-            if z_e3 >= z_e4: raise ValueError("Element 3 has negative edge thickness")
+            z_sags = [s.sagittalZ(self.radius) for s in optical_surfaces]
 
-        self.bounds = [
-            (z_e1, z_e2),  # Elem 1
-            (z_e2, z_e3),  # Elem 2
-            (z_e3, z_e4)  # Elem 3
-        ]
+            for i in range(len(z_sags) - 1):
+                if z_sags[i] > z_sags[i + 1]:
+                    raise ValueError(f"Optical surfaces {i + 1} and {i + 2} intersect")
 
-        # 5. Separate Edges
-        self.edge1 = Cylinder(self.half_D, device=device)
-        self.edge2 = Cylinder(self.half_D, device=device)
-        self.edge3 = Cylinder(self.half_D, device=device)
+    @property
+    def T1(self):
+        """Thickness of the first element."""
+        return self.surfaces[1].transform.trans[2] - self.surfaces[0].transform.trans[2]
 
-        # Order: [S1, S2, S3, S4, E1, E2, E3]
-        self.surfaces = [
-            self.surf1, self.surf2, self.surf3, self.surf4,
-            self.edge1, self.edge2, self.edge3
-        ]
+    @property
+    def T2(self):
+        """Thickness of the second element."""
+        return self.surfaces[2].transform.trans[2] - self.surfaces[1].transform.trans[2]
+
+    @property
+    def T3(self):
+        """Thickness of the third element."""
+        return self.surfaces[3].transform.trans[2] - self.surfaces[2].transform.trans[2]

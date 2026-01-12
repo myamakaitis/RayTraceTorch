@@ -15,6 +15,8 @@ class Surface(nn.Module):
 
         super().__init__()
 
+        self.epsilon = nn.Parameter(torch.as_tensor(1e-6), requires_grad=False)
+
         if transform is None:
             self.transform = RayTransform()
         else:
@@ -109,7 +111,7 @@ class Plane(Surface):
         oz = local_pos[:, 2]
         dz = local_dir[:, 2]
 
-        safe_dz = torch.where(torch.abs(dz) < epsilon, 1e-8, dz)
+        safe_dz = torch.where(torch.abs(dz) < self.epsilon, 1e-8, dz)
 
         t = -oz / safe_dz
 
@@ -283,23 +285,23 @@ class Quadric(Surface):
         # 1. Create a mask for valid intersections (Real roots exist)
         # Rays with discriminant < 0 effectively miss the surface.
         hit_mask = discriminant >= 0
+        mask_linear = torch.abs(A) < self.epsilon
+
         sqrt_delta = torch.sqrt(torch.abs(discriminant))
+        A_safe = torch.where(mask_linear, torch.ones_like(A), A)
 
-        t1 = (-B - sqrt_delta) / (2.0 * A)
-        t2 = (-B + sqrt_delta) / (2.0 * A)
+        t1 = (-B - sqrt_delta) / (2.0 * A_safe)
+        t2 = (-B + sqrt_delta) / (2.0 * A_safe)
 
+        # Avoid div/0 for linear case
+        B_safe = torch.where(torch.abs(B) < self.epsilon, torch.full_like(B, self.epsilon.item()), B)
+        t_linear = -C / B_safe
+
+        # If A is effectively zero, use the linear solution
         inf = float('inf')
         t1 = torch.where(hit_mask, t1, torch.full_like(t1, inf))
         t2 = torch.where(hit_mask, t2, torch.full_like(t2, inf))
 
-        epsilon_a = 1e-7
-        mask_linear = torch.abs(A) < epsilon_a
-
-        # Avoid div/0 for linear case
-        safe_B = torch.where(torch.abs(B) < 1e-8, torch.tensor(1e-8, device=self.device), B)
-        t_linear = -C / safe_B
-
-        # If A is effectively zero, use the linear solution
         t1 = torch.where(mask_linear, t_linear, t1)
         t2 = torch.where(mask_linear, t_linear, t2)
 

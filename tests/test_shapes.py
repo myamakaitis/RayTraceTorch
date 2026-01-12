@@ -8,7 +8,7 @@ import numpy as np
 # Ensure we can import from src
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from geom import Singlet, RayTransform, eulerToRotMat
+from geom import Singlet, RayTransform
 from geom import Doublet, Triplet
 from geom import Box
 from rays import Rays
@@ -26,8 +26,8 @@ def scan_lens_profile(lens, axis='x', num_points=200):
         profiles: List of (h, z) arrays, one for each surface found.
     """
     # Determine scan width based on available attributes
-    if hasattr(lens, 'D'):
-        width = lens.D.item()
+    if hasattr(lens, 'radius'):
+        width = 2*lens.radius.item()
     else:
         width = 3  # Default fallback
 
@@ -47,7 +47,7 @@ def scan_lens_profile(lens, axis='x', num_points=200):
         directions = torch.tensor([[0.0, 0.0, 1.0]]).expand(num_points, 3)
 
     # Create Rays
-    rays = Rays(origins, directions, device=lens.device)
+    rays = Rays(origins, directions)
 
     # Intersect
     # t_matrix: [N, NumSurfaces]
@@ -65,8 +65,8 @@ def scan_lens_profile(lens, axis='x', num_points=200):
         mask = t < float('inf')
 
         if mask.any():
-            h_valid = coords[mask].cpu().numpy()
-            z_valid = (-100.0 + t[mask]).cpu().numpy()
+            h_valid = coords[mask].cpu().detach().numpy()
+            z_valid = (-100.0 + t[mask]).cpu().detach().numpy()
             profiles.append((h_valid, z_valid))
         else:
             profiles.append(([], []))
@@ -153,7 +153,7 @@ def test_lenses():
 
     # 6. Rectangular Box
     # Center=(0,0,0)
-    boxTransform = RayTransform(rotation=eulerToRotMat(torch.tensor([0, np.pi/4, np.pi/4])))
+    boxTransform = RayTransform(rotation=(torch.tensor([0, np.pi/4, 0])))
 
     b1 = Box(length = torch.tensor(1.0), width=torch.tensor(1.0), height=torch.tensor(1.0),
              transform=boxTransform)

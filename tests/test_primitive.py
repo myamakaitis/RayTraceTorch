@@ -40,7 +40,7 @@ def test_Plane():
     dir = [[0, 0, 1], [0, 0, 1], [0, 0, 1]]
     rays = create_rays(pos, dir)
 
-    t, hits, norms = plane.intersect(rays)
+    t, hits, norms = plane(rays)
 
     # A. Validate Ray Equation
     check_ray_equation(rays, t, hits)
@@ -68,7 +68,7 @@ def test_Sphere():
     dir = [[0, 0, 1], [0, 0, 1], [0, 1, 0]]
     rays = create_rays(pos, dir)
 
-    t, hits, norms = sphere.intersect(rays)
+    t, hits, norms = sphere(rays)
 
     # A. Validate Ray Equation
     check_ray_equation(rays, t, hits)
@@ -106,7 +106,7 @@ def test_Quadric():
     dir = [[0, 0, 1], [0, 0, 1]]
     rays = create_rays(pos, dir)
 
-    t, hits, norms = quadric.intersect(rays)
+    t, hits, norms = quadric(rays)
 
     check_ray_equation(rays, t, hits)
 
@@ -136,7 +136,7 @@ def test_Quadric():
         directions=[[0, 0, 1], [0, 0, 1], [0, 0.1, 1], [0, 0.1, 1]]
     )
 
-    t, hits, norms = quadric.intersect(rays)
+    t, hits, norms = quadric(rays)
     check_ray_equation(rays, t, hits)
 
     # Validate against Implicit Equation
@@ -169,8 +169,8 @@ def test_plane_translation_grad():
 
     # 2. Setup the Geometry
     # We pass the tracked tensor into the transform
-    transform = RayTransform(translation=plane_translation, device=device)
-    plane = Plane(transform=transform, device=device)
+    transform = RayTransform(translation=plane_translation, trans_grad=True, rot_grad=False)
+    plane = Plane(transform=transform)
 
     # 3. Define an Incoming Ray
     # Origin at (0,0,0), pointing at angle (Slope=1 in YZ plane)
@@ -184,7 +184,7 @@ def test_plane_translation_grad():
     rays = Rays(origins, directions, device=device)
 
     # 4. Forward Pass: Intersect
-    t, hit_point, normals = plane.intersect(rays)
+    t, hit_point, normals = plane(rays)
 
     # --- ANALYTIC CHECK (Forward) ---
     # Ray: P = t * [0, 1/sqrt(2), 1/sqrt(2)]
@@ -206,9 +206,13 @@ def test_plane_translation_grad():
 
     loss.backward()
 
+    for name, param in plane.named_parameters():
+        if param.grad is not None:
+            print(f"Gradient for {name}: {param.grad.data}")
+
     # 6. Verify Gradients (The Core Test)
-    grads = plane_translation.grad
-    print(f"Gradients w.r.t Plane Translation (Tx, Ty, Tz): {grads.tolist()}")
+    grads = transform.trans.grad
+    # print(f"Gradients w.r.t Plane Translation (Tx, Ty, Tz): {grads.tolist()}")
 
     # A. Gradient w.r.t X and Y Translation (Tx, Ty)
     # An infinite plane at Z=5 is invariant to shifts in X and Y.
@@ -226,5 +230,70 @@ def test_plane_translation_grad():
     # Loss = H_x + H_y + H_z = 0 + Tz + Tz = 2 * Tz
     # d(Loss) / d(Tz) should be 2.0
     expected_grad_z = 2.0
+    assert torch.isclose(grads[2], torch.tensor(expected_grad_z), atol=1e-5), \
+        f"Gradient w.r.t Tz incorrect. Got {grads[2]}, expected {expected_grad_z}"
+
+def test_quadratic_translation_grad():
+    """
+    Verifies that gradients propagate correctly from the intersection point
+    back to the Plane's translation parameters.
+    """
+    device = 'cpu'
+
+    # 1. Setup the Parameter to Optimize (The Plane's Position)
+    # We initialize it at (0, 0, 5) so the plane is at Z=5.
+    # requires_grad=True is the modern equivalent of autograd.Variable
+    plane_translation = torch.tensor([0.0, 0.0, 5.0], device=device, requires_grad=True)
+
+    # 2. Setup the Geometry
+    # We pass the tracked tensor into the transform
+    transform = RayTransform(translation=plane_translation, trans_grad=True, rot_grad=False)
+    quadric = Quadric(transform=transform, c=0.01, k=0.0, c_grad=True)
+
+    # 3. Define an Incoming Ray
+    # Origin at (0,0,0), pointing at angle (Slope=1 in YZ plane)
+    # Direction: (0, 0.707, 0.707)
+    # This ensures the ray hits the plane at an angle, so Z-translation affects Y-position.
+    origins = torch.tensor([[5.0, 0.0, 0.0]], device=device)
+    directions = torch.tensor([[0.0, 0.0, 1.0]], device=device)
+    # Normalize manually or rely on Rays class
+    directions = directions / torch.norm(directions, dim=1, keepdim=True)
+
+    rays = Rays(origins, directions, device=device)
+
+    # 4. Forward Pass: Intersect
+    t, hit_point, normals = quadric(rays)
+
+    # --- ANALYTIC CHECK (Forward) ---
+    # Ray: P = t * [0, 1/sqrt(2), 1/sqrt(2)]
+    # Plane: Z = 5
+    # Intersection: t * 1/sqrt(2) = 5  =>  t = 5 * sqrt(2)
+    # Hit Point: (0, 5, 5)
+    print(f"\nHit Point: {hit_point.detach().cpu().numpy()}")
+
+    # 5. Define Loss and Backward Pass
+    # We want to see how the hit point changes if we move the plane.
+    # Loss = Sum of all coordinates of the hit point (H_x + H_y + H_z)
+    loss = hit_point.sum()
+
+    loss.backward()
+
+    for name, param in quadric.named_parameters():
+        if param.grad is not None:
+            print(f"Gradient for {name}: {param.grad.data}")
+
+    # 6. Verify Gradients (The Core Test)
+    grads = transform.trans.grad
+    # print(f"Gradients w.r.t Plane Translation (Tx, Ty, Tz): {grads.tolist()}")
+
+
+    # B. Gradient w.r.t Z Translation (Tz)
+    # Analytic derivation:
+    # Ray: Y = Z (since dy=dz=0.707)
+    # Plane: Z = Tz
+    # Hit Point: H = (0, Tz, Tz)
+    # Loss = H_x + H_y + H_z = 0 + Tz + Tz = 2 * Tz
+    # d(Loss) / d(Tz) should be 2.0
+    expected_grad_z = 1.0
     assert torch.isclose(grads[2], torch.tensor(expected_grad_z), atol=1e-5), \
         f"Gradient w.r.t Tz incorrect. Got {grads[2]}, expected {expected_grad_z}"
