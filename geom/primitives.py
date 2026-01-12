@@ -51,7 +51,7 @@ class Surface(nn.Module):
 
         return t
 
-    def intersectSurface(self, rays, *args):
+    def forward(self, rays, *args):
         """
         Performs a full intersection calculation tracking gradients.
 
@@ -112,7 +112,7 @@ class Plane(Surface):
         safe_dz = torch.where(torch.abs(dz) < epsilon, 1e-8, dz)
 
         t = -oz / safe_dz
-        
+
         return [t]
 
     def _getNormal(self, local_pos):

@@ -64,7 +64,7 @@ class Shape(nn.Module):
         # Stack into a matrix [N, Number_of_Surfaces]
         return torch.stack(t_list, dim=1)
 
-    def intersectSurface(self, rays, surf_idx):
+    def forward(self, rays, surf_idx):
         """
         Calculates the full differentiable intersection for a SPECIFIC surface index.
         Used after logic determines which surface was actually hit.
