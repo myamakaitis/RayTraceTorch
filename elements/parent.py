@@ -3,8 +3,8 @@ import torch.nn as nn
 from typing import List, Union
 
 from ..geom.shape import Shape
-from ..geom.primitives import Surface
-from ..phys.phys_std import SurfaceFunction
+from ..geom.primitives import Surface, Plane
+from ..phys.phys_std import SurfaceFunction, Reflect, Linear
 
 class Element(nn.Module):
     """
@@ -28,6 +28,7 @@ class Element(nn.Module):
 
         self.shape = None
         self.surface_functions = nn.ModuleList()
+        self.Nsurfaces = 0
 
     def intersectTest(self, rays):
         """
@@ -58,3 +59,21 @@ class Element(nn.Module):
         new_dir_global, intensity_mult = phys_func(hit_local, rays.dir, normal_global)
 
         return new_pos_global, new_dir_global, intensity_mult
+
+
+class SingleSurfFunc(Element):
+
+    def __init__(self, shape, surfaceFunc):
+
+        super().__init__()
+
+        self.shape = shape
+        if hasattr(shape, surfaces):
+            self.Nsurfaces = len(surfaceFunc.surfaces)
+        else:
+            self.Nsurfaces = 1
+
+        for _ in range(self.Nsurfaces):
+            self.surface_functions.append(surfaceFunc)
+
+

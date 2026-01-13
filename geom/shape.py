@@ -91,7 +91,7 @@ class Shape(nn.Module):
         # Normals rotate with the element: N_global = N_local @ R.T
         normal_global = normal_elem @ self.transform.rot.T
 
-        return t, hit_point_global, normal_global, hit_local, dir_local
+        return t, hit_point_global, normal_global, hit_local
 
     def inBounds(self, local_pos, surf_idx):
         """

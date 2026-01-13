@@ -85,7 +85,7 @@ class Surface(nn.Module):
         # Consistent with transform.py: D_global = D_local @ R.T
         normal_global = normal_local @ self.transform.rot.T
 
-        return t, hit_global, normal_global, hit_local, dir_local
+        return t, hit_global, normal_global, hit_local
 
     # --- Abstract Methods ---
 

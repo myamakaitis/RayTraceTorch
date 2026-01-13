@@ -32,8 +32,8 @@ class SurfaceFunction(nn.Module):
 class Linear(SurfaceFunction):
 
     def __init__(self,
-                Cx, Cy,
-                Dx, Dy,
+                Cx = 0, Cy = 0,
+                Dx = 1, Dy = 1,
                 Cx_grad = False, Cy_grad = False,
                 Dx_grad = False, Dy_grad = False,
                 transform=None):

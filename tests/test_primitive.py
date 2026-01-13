@@ -40,7 +40,7 @@ def test_Plane():
     dir = [[0, 0, 1], [0, 0, 1], [0, 0, 1]]
     rays = create_rays(pos, dir)
 
-    t, hits, norms = plane(rays)
+    t, hits, norms, _ = plane(rays)
 
     # A. Validate Ray Equation
     check_ray_equation(rays, t, hits)
@@ -68,7 +68,7 @@ def test_Sphere():
     dir = [[0, 0, 1], [0, 0, 1], [0, 1, 0]]
     rays = create_rays(pos, dir)
 
-    t, hits, norms = sphere(rays)
+    t, hits, norms, _ = sphere(rays)
 
     # A. Validate Ray Equation
     check_ray_equation(rays, t, hits)
@@ -106,7 +106,7 @@ def test_Quadric():
     dir = [[0, 0, 1], [0, 0, 1]]
     rays = create_rays(pos, dir)
 
-    t, hits, norms = quadric(rays)
+    t, hits, norms, _ = quadric(rays)
 
     check_ray_equation(rays, t, hits)
 
@@ -136,7 +136,7 @@ def test_Quadric():
         directions=[[0, 0, 1], [0, 0, 1], [0, 0.1, 1], [0, 0.1, 1]]
     )
 
-    t, hits, norms = quadric(rays)
+    t, hits, norms, _ = quadric(rays)
     check_ray_equation(rays, t, hits)
 
     # Validate against Implicit Equation
@@ -184,7 +184,7 @@ def test_plane_translation_grad():
     rays = Rays(origins, directions, device=device)
 
     # 4. Forward Pass: Intersect
-    t, hit_point, normals = plane(rays)
+    t, hit_point, normals, _ = plane(rays)
 
     # --- ANALYTIC CHECK (Forward) ---
     # Ray: P = t * [0, 1/sqrt(2), 1/sqrt(2)]
@@ -262,7 +262,7 @@ def test_quadratic_translation_grad():
     rays = Rays(origins, directions, device=device)
 
     # 4. Forward Pass: Intersect
-    t, hit_point, normals = quadric(rays)
+    t, hit_point, normals, _ = quadric(rays)
 
     # --- ANALYTIC CHECK (Forward) ---
     # Ray: P = t * [0, 1/sqrt(2), 1/sqrt(2)]

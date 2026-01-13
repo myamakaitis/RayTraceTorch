@@ -52,7 +52,7 @@ class Disk(Plane, SurfaceBounded):
 
     def __init__(self, radius, transform = None):
         super().__init__()
-        self.radius = torch.tensor(radius, dtype=torch.float32)
+        self.radius = nn.Parmeter(torch.as_tensor(radius), requires_grad=False)
 
     def inBounds(self, local_pos):
         # r^2 = x^2 + y^2
@@ -124,7 +124,7 @@ class HalfSphere(Quadric, SurfaceBounded):
 
     def sagittalZ(self, radius):
         """Calculates Z-coordinate of the surface edge relative to vertex Z."""
-        r_sq = (radius / 2.0) ** 2
+        r_sq = (radius) ** 2
 
         # Sag equation for vertex formulation
         term = 1.0 - self.c ** 2 * r_sq

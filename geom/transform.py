@@ -71,7 +71,7 @@ class RayTransform(nn.Module):
         # Apply Rotation (P @ R.T is standard for row-vector multiplication)
 
         # Inverse Translation
-        shifted_pos = rays.pos - self.trans
+        shifted_pos = rays.pos - self.trans[None, :]
 
         local_pos = shifted_pos @ self.rot
         local_dir = rays.dir @ self.rot
@@ -94,7 +94,15 @@ class RayTransform(nn.Module):
         # Here self.rot is Local_to_Global. So we need to multiply by R_inverse.
         # @ R.T rotates forward. v @ R rotates backward.
 
-        global_pos = (rays.pos @ self.rot.T) + self.trans
+        global_pos = (rays.pos @ self.rot.T) + self.trans[None, :]
         global_dir = (rays.dir @ self.rot.T)
 
         return global_pos, global_dir
+
+class NoisyTransform(RayTransform):
+    """
+    Transform class that selectively adds random perturbations with a normal distribution to rotation and translation
+    useful for optical design with realistic tolerances
+    """
+    def __init__(self):
+        raise NotImplementedError()

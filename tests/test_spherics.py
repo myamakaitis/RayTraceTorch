@@ -128,6 +128,12 @@ def test_lenses():
     s1 = Singlet(C1=1/torch.tensor(50.0), C2=1/torch.tensor(-50.0), D=torch.tensor(25.0), T=torch.tensor(10.0))
     plot_lens(s1, "Bi-Convex Singlet", "singlet_biconvex.png")
 
+    # 1. Bi-Convex Singlet Flipped
+    # R1=50 (Center Right), R2=-50 (Center Left), D=25, T=10
+    flip = RayTransform(rotation=(torch.tensor([0, np.pi/2, 0])))
+    s1 = Singlet(C1=1/torch.tensor(50.0), C2=1/torch.tensor(-50.0), D=torch.tensor(25.0), T=torch.tensor(10.0), transform=flip)
+    plot_lens(s1, "Bi-Convex Flipped Singlet", "singlet_biconvex_flipped.png")
+
     # 2. Meniscus Singlet
     # R1=30 (Convex), R2=100 (Concave, following), D=20, T=5
     s2 = Singlet(C1=1/torch.tensor(30.0), C2=1/torch.tensor(100.0), D=torch.tensor(20.0), T=torch.tensor(5.0))
