@@ -16,8 +16,9 @@ class SurfaceFunction(nn.Module):
         Apply surface physics to incoming rays.
 
         Args:
+            local_intersect (Tensor): [N, 3] Intersection location in local coordinates.
             ray_dir (Tensor): [N, 3] Normalized incident direction (Local or Global).
-            normal (Tensor):  [N, 3] Normalized surface normal at hit point.
+            normal (Tensor):  [N, 3] Normalized surface normal at hit point (Local or Global, but consistent with ray_dir).
             **kwargs:         Allow passing extra data (wavelength, etc.) that
                               specific children might need.
 
@@ -55,6 +56,7 @@ class Linear(SurfaceFunction):
         Apply surface physics to incoming rays.
 
         Args:
+            local_intersect (Tensor): [N, 3] Intersection location in local coordinates.
             ray_dir (Tensor): [N, 3] Normalized incident direction (Local or Global).
             normal (Tensor):  [N, 3] Normalized surface normal at hit point.
             **kwargs:         Allow passing extra data (wavelength, etc.) that
@@ -66,16 +68,16 @@ class Linear(SurfaceFunction):
             meta (dict):      Optional metadata (e.g., attenuation, validity mask).
         """
 
-        ray_dir_local = rays.dir @ self.transform.rot
+        ray_dir_local = ray_dir @ self.transform.rot
 
         # assumes valid intersect
-        ray_dir_local = ray_dir_local / ray_dir_local[:, 2]
+        ray_dir_local = ray_dir_local / ray_dir_local[:, 2][:, None]
 
         new_ray_dir_x_local = self.Cx * local_intersect[:, 0] + self.Dx * ray_dir_local[:, 0]
         new_ray_dir_y_local = self.Cy * local_intersect[:, 1] + self.Dy * ray_dir_local[:, 1]
         new_ray_dir_z_local = torch.ones_like(local_intersect[:, 0])
 
-        new_ray_dir_local = torch.stack([new_ray_dir_x_local, new_ray_dir_y_local, new_ray_dir_z_local])
+        new_ray_dir_local = torch.stack([new_ray_dir_x_local, new_ray_dir_y_local, new_ray_dir_z_local], dim=1)
         new_ray_dir_local = F.normalize(new_ray_dir_local, p=2, dim=1)
         out_dir = new_ray_dir_local @ self.transform.rot.T
 

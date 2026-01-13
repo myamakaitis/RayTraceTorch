@@ -3,9 +3,8 @@ import torch.nn as nn
 from typing import List, Union
 
 from .parent import Element
-from ..geom.primitives import Plane
-from ..geom.bounded import Disk
-from ..phys.phys_std import Linear
+from ..geom import Plane, Disk
+from ..phys import Linear
 
 class LinearElement(Element):
 
@@ -15,8 +14,10 @@ class LinearElement(Element):
 
         self.shape = shape
 
-        self.linSurfFunc = linSurfFunc
-        self.linSurfFunc.transform = shape.transform
+
+        linSurfFunc.transform = shape.transform
+
+        self.surface_functions.append(linSurfFunc)
         self.Nsurfaces = 1
 
 
@@ -29,18 +30,19 @@ class IdealThinLens(LinearElement):
         else:
             plane = Disk(radius=diameter/2, transform=transform)
 
-        self.P = nn.Parameter(torch.as_tensor(1 / focal), requires_grad=focal_grad)
-        linSurfFunc = Linear()
 
-        linSurfFunc.Cx = self.P
-        linSurfFunc.Cy = self.P
+        linSurfFunc = Linear()
 
         super().__init__(shape = plane, linSurfFunc=linSurfFunc)
 
+        self.P = nn.Parameter(torch.as_tensor(-1 / focal), requires_grad=focal_grad)
+
+        self.surface_functions[0].Cx = self.P
+        self.surface_functions[0].Cy = self.P
+
     @property
     def f(self):
-
-        return 1 / self.P
+        return -1 / self.P
 
 
 class IdealCylThinLens(LinearElement):
@@ -54,22 +56,21 @@ class IdealCylThinLens(LinearElement):
         else:
             plane = Disk(radius=diameter/2, transform=transform)
 
-        self.Px = nn.Parameter(torch.as_tensor(1 / focal_x), requires_grad=focal_x_grad)
-        self.Py = nn.Parameter(torch.as_tensor(1 / focal_y), requires_grad=focal_y_grad)
-
         linSurfFunc = Linear()
-
-        linSurfFunc.Cx = self.Px
-        linSurfFunc.Cy = self.Py
 
         super().__init__(shape = plane, linSurfFunc=linSurfFunc)
 
+
+        self.Px = nn.Parameter(torch.as_tensor(-1 / focal_x), requires_grad=focal_x_grad)
+        self.Py = nn.Parameter(torch.as_tensor(-1 / focal_y), requires_grad=focal_y_grad)
+
+        self.surface_functions[0].Cx = self.Px
+        self.surface_functions[1].Cy = self.Py
+
     @property
     def fx(self):
-
-        return 1 / self.Px
+        return -1 / self.Px
 
     @property
     def fy(self):
-
-        return 1 / self.Py
+        return -1 / self.Py

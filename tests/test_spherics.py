@@ -6,7 +6,7 @@ import numpy as np
 
 
 # Ensure we can import from src
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+# sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from geom import Singlet, RayTransform
 from geom import Doublet, Triplet, CylSinglet

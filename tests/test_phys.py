@@ -1,5 +1,9 @@
 import torch
-from phys import RefractSnell, RefractFresnel, Reflect, Transmit, Block
+import sys
+import os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+from RayTraceTorch.phys import RefractSnell, RefractFresnel, Reflect, Transmit, Block
 
 def test_tir_logic():
     device = 'cpu'
@@ -45,7 +49,7 @@ def test_fresnel_probability():
     refract_op = RefractFresnel(n_in=1.0, n_out=1.5)
 
     # 1. Create a large batch of identical rays for statistics
-    N = 10000
+    N = 100000
     ray_dir = torch.tensor([[0.0, 0.0, 1.0]]).repeat(N, 1)  # +Z
     normal = torch.tensor([[0.0, 0.0, -1.0]]).repeat(N, 1)  # -Z (opposing)
 

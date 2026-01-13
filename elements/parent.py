@@ -2,9 +2,8 @@ import torch
 import torch.nn as nn
 from typing import List, Union
 
-from ..geom.shape import Shape
-from ..geom.primitives import Surface, Plane
-from ..phys.phys_std import SurfaceFunction, Reflect, Linear
+from ..geom import Shape, Surface, Plane
+from ..phys import SurfaceFunction, Reflect, Linear
 
 class Element(nn.Module):
     """

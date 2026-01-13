@@ -44,6 +44,14 @@ class Spheric(Shape):
 
             return in_aperture
 
+    @property
+    def T(self):
+        return self.surfaces[self.N_optical-1].transform.trans[2] - self.surfaces[0].transform.trans[2]
+
+    @property
+    def T_edge(self):
+        self.surfaces[self.N_optical-1].sagittalZ(self.radius) - self.surfaces[0].sagittalZ(self.radius)
+
 class Singlet(Spheric):
     """
     A 3D Singlet Lens defined by two optical surfaces (Sphere or Plane) and a cylindrical edge.
@@ -101,9 +109,7 @@ class Singlet(Spheric):
             if z_e1 > z_e2:
                 raise ValueError("Intersecting optical surfaces")
 
-    @property
-    def T(self):
-        return self.surfaces[self.N_optical-1].transform.trans[2] - self.surfaces[0].transform.trans[2]
+
 
 
 class Doublet(Spheric):
