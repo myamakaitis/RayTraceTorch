@@ -9,7 +9,7 @@ import numpy as np
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from geom import Singlet, RayTransform
-from geom import Doublet, Triplet
+from geom import Doublet, Triplet, CylSinglet
 from geom import Box
 from rays import Rays
 

@@ -1,7 +1,7 @@
 
 import torch
 from .transform import RayTransform
-from .primitives import Surface, Plane, Sphere, Quadric
+from .primitives import Surface, Plane, Sphere, Quadric, QuadricZY
 
 class SurfaceBounded(Surface):
     """
@@ -127,6 +127,33 @@ class HalfSphere(Quadric, SurfaceBounded):
         r_sq = (radius / 2.0) ** 2
 
         # Sag equation for vertex formulation
+        term = 1.0 - self.c ** 2 * r_sq
+        term = torch.relu(term)
+        denom = 1.0 + torch.sqrt(term)
+
+        sag = (self.c * r_sq) / denom
+        return sag + self.transform.trans[2]
+
+
+class HalfCyl(QuadricZY, SurfaceBounded):
+    """
+    A Cylindrical surface clipped to the valid hemisphere (relative to curvature).
+    """
+
+    def __init__(self, curvature, curvature_grad, transform=None):
+        # Initialize as QuadricZY with k=0 (Cylinder)
+        super().__init__(c=curvature, c_grad=curvature_grad, k=0.0, k_grad=False, transform=transform)
+
+    def inBounds(self, local_pos):
+        # Check validity similar to HalfSphere: sign(z) != sign(R) => z*c < 1 (approx)
+        z = local_pos[:, 2]
+        return torch.abs(z * self.c) < 1.001
+
+    def sagittalZ(self, y_height):
+        """Calculates Z-coordinate of the surface at a specific Y height."""
+        # Standard sag equation applied to y
+        r_sq = y_height ** 2
+
         term = 1.0 - self.c ** 2 * r_sq
         term = torch.relu(term)
         denom = 1.0 + torch.sqrt(term)

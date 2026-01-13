@@ -73,10 +73,10 @@ class RayTransform(nn.Module):
         # Inverse Translation
         shifted_pos = rays.pos - self.trans
 
-        global_pos = shifted_pos @ self.rot
-        global_dir = rays.dir @ self.rot
+        local_pos = shifted_pos @ self.rot
+        local_dir = rays.dir @ self.rot
 
-        return global_pos, global_dir
+        return local_pos, local_dir
 
 
     def invTransform(self, rays):
@@ -94,7 +94,7 @@ class RayTransform(nn.Module):
         # Here self.rot is Local_to_Global. So we need to multiply by R_inverse.
         # @ R.T rotates forward. v @ R rotates backward.
 
-        local_pos = (rays.pos @ self.rot.T) + self.trans
-        local_dir = (rays.dir @ self.rot.T)
+        global_pos = (rays.pos @ self.rot.T) + self.trans
+        global_dir = (rays.dir @ self.rot.T)
 
-        return local_pos, local_dir
+        return global_pos, global_dir

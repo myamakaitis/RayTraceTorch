@@ -82,18 +82,16 @@ class Shape(nn.Module):
         local_rays = rays.with_coords(local_pos, local_dir)
 
         # 2. Call child intersection (Returns results in Element Frame)
-        t, elem_hit, elem_normal = self.surfaces[surf_idx].intersect(local_rays)
-
-        # 3. Transform Results back to Global Frame
+        t, hit_elem, normal_elem, hit_local, dir_local = self.surfaces[surf_idx](local_rays)
 
         # A. Hit Point: Recompute in global to ensure graph consistency
-        hit_point = rays.pos + t.unsqueeze(1) * rays.dir
+        hit_point_global = rays.pos + t.unsqueeze(1) * rays.dir
 
         # B. Normal: Transform Element -> Global
         # Normals rotate with the element: N_global = N_local @ R.T
-        global_normal = elem_normal @ self.transform.rot.T
+        normal_global = normal_elem @ self.transform.rot.T
 
-        return t, hit_point, global_normal
+        return t, hit_point_global, normal_global, hit_local, dir_local
 
     def inBounds(self, local_pos, surf_idx):
         """
@@ -193,6 +191,72 @@ class Box(CvxPolyhedron):
         # 2. Back (-Z face)
         # Rotate 180 Y so it faces -Z. Translate to -hz.
         self.surfaces.append(make_plane([0, 0, 0 - length/2], [0.0, torch.pi, 0.0], l_grad))
+
+        # 3. Right (+X face)
+        # Rotate +90 Y. Normal (0,0,1) -> (1,0,0). Translate to +hx.
+        self.surfaces.append(make_plane([0 + width/2, 0, 0], [0.0, -torch.pi / 2, 0.0], w_grad))
+
+        # 4. Left (-X face)
+        # Rotate -90 Y. Normal (0,0,1) -> (-1,0,0). Translate to -hx.
+        self.surfaces.append(make_plane([0 - width/2, 0, 0], [0.0, torch.pi / 2, 0.0], w_grad))
+
+        # 5. Top (+Y face)
+        # Rotate -90 X. Normal (0,0,1) -> (0,1,0). Translate to +hy.
+        self.surfaces.append(make_plane([0, 0 + height/2, 0], [torch.pi / 2, 0.0, 0.0], h_grad))
+
+        # 6. Bottom (-Y face)
+        # Rotate +90 X. Normal (0,0,1) -> (0,-1,0). Translate to -hy.
+        self.surfaces.append(make_plane([0, 0 - height/2, 0], [-torch.pi / 2, 0.0, 0.0], h_grad))
+
+
+class Box4Side(CvxPolyhedron):
+    """
+    A rectangular prism defined by 6 Plane surfaces.
+    """
+
+    def __init__(self, width, height, transform=None,
+                 w_grad = False, h_grad = False):
+
+        super().__init__(transform=transform)
+
+        self._build_surfaces(width, height, w_grad, h_grad)
+
+    @property
+    def width(self):
+        return surfaces[0].transform.trans[0] - surfaces[1].transform.trans[0]
+
+    @property
+    def height(self):
+        return surfaces[2].transform.trans[1] - surfaces[3].transform.trans[1]
+
+    def _build_surfaces(self, width, height, w_grad, h_grad):
+        """
+        Generates 6 infinite planes oriented to form the box faces.
+        """
+
+        # Helper to create a plane with specific position and rotation
+        def make_plane(pos, rot_vec, optimize_flag):
+            # rot_angles: [x_deg, y_deg, z_deg]
+            # Convert to radians for RayTransform (assuming it takes radians or has a helper)
+            # Here assuming RayTransform takes translation and rotation matrix/Euler
+            # We construct a Transform that moves the canonical Plane (Z=0 facing +Z)
+            # to the desired face.
+
+            # Simple Euler to Matrix conversion (simplified for 90 deg steps)
+            # Or pass angles if RayTransform supports it.
+            # Assuming RayTransform(translation=..., rotation=...)
+
+            # For simplicity, we define the 6 faces relative to Global.
+
+            with torch.no_grad():
+                trans_mask = (torch.abs(torch.tensor(pos))>1e-5)
+
+            t = RayTransform(translation=torch.tensor(pos),
+                             rotation=torch.tensor(rot_vec),
+                             trans_grad=optimize_flag,
+                             trans_mask=trans_mask)
+
+            return Plane(transform=t)
 
         # 3. Right (+X face)
         # Rotate +90 Y. Normal (0,0,1) -> (1,0,0). Translate to +hx.

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from ..geom.transform import RayTransform
 
 class SurfaceFunction(nn.Module):
     """
@@ -28,6 +29,61 @@ class SurfaceFunction(nn.Module):
         raise NotImplementedError
 
 
+class Linear(SurfaceFunction):
+
+    def __init__(self,
+                Cx, Cy,
+                Dx, Dy,
+                Cx_grad = False, Cy_grad = False,
+                Dx_grad = False, Dy_grad = False,
+                transform=None):
+
+        super().__init__()
+        self.Cx = nn.Parameter(torch.as_tensor(Cx), requires_grad=Cx_grad)
+        self.Cy = nn.Parameter(torch.as_tensor(Cy), requires_grad=Cy_grad)
+
+        self.Dx = nn.Parameter(torch.as_tensor(Dx), requires_grad=Dx_grad)
+        self.Dy = nn.Parameter(torch.as_tensor(Dy), requires_grad=Dy_grad)
+
+        if transform is None:
+            self.transform = RayTransform()
+        else:
+            self.transform = transform
+
+    def forward(self, local_intersect, ray_dir, normal, **kwargs):
+        """
+        Apply surface physics to incoming rays.
+
+        Args:
+            ray_dir (Tensor): [N, 3] Normalized incident direction (Local or Global).
+            normal (Tensor):  [N, 3] Normalized surface normal at hit point.
+            **kwargs:         Allow passing extra data (wavelength, etc.) that
+                              specific children might need.
+
+        Returns:
+            new_dir (Tensor): [N, 3] Outgoing ray direction.
+            intensity_modulation (Tensor): [N, 1] Modulation intensity.
+            meta (dict):      Optional metadata (e.g., attenuation, validity mask).
+        """
+
+        ray_dir_local = rays.dir @ self.transform.rot
+
+        # assumes valid intersect
+        ray_dir_local = ray_dir_local / ray_dir_local[:, 2]
+
+        new_ray_dir_x_local = self.Cx * local_intersect[:, 0] + self.Dx * ray_dir_local[:, 0]
+        new_ray_dir_y_local = self.Cy * local_intersect[:, 1] + self.Dy * ray_dir_local[:, 1]
+        new_ray_dir_z_local = torch.ones_like(local_intersect[:, 0])
+
+        new_ray_dir_local = torch.stack([new_ray_dir_x_local, new_ray_dir_y_local, new_ray_dir_z_local])
+        new_ray_dir_local = F.normalize(new_ray_dir_local, p=2, dim=1)
+        out_dir = new_ray_dir_local @ self.transform.rot.T
+
+        intensity_mod = torch.ones_like(ray_dir[:, 0])
+
+        return out_dir, intensity_mod
+
+
 class Reflect(SurfaceFunction):
     """
     Perfect specular reflection.
@@ -45,7 +101,7 @@ class Reflect(SurfaceFunction):
 
         intensity_mod = torch.ones_like(ray_dir[:, 0])
 
-        return reflect_dir, intensity_mod
+        return out_dir, intensity_mod
 
 
 class RefractSnell(SurfaceFunction):
@@ -55,10 +111,10 @@ class RefractSnell(SurfaceFunction):
     the ray is reflected instead of refracted.
     """
 
-    def __init__(self, n_in, n_out):
+    def __init__(self, n_in, n_out, n_in_grad = False, n_out_grad = False):
         super().__init__()
-        self.n_in = nn.Parameter(torch.tensor(n_in))
-        self.n_out = nn.Parameter(torch.tensor(n_out))
+        self.n_in = nn.Parameter(torch.as_tensor(n_in), requires_grad=n_in_grad)
+        self.n_out = nn.Parameter(torch.as_tensor(n_out), requires_grad=n_out_grad)
 
     def forward(self, local_intersect, ray_dir, normal, **kwargs):
         # 1. Orientation Check
@@ -127,10 +183,10 @@ class RefractFresnel(SurfaceFunction):
     - Grazing angles -> Higher probability of reflection.
     """
 
-    def __init__(self, n_in, n_out):
+    def __init__(self, n_in, n_out, n_in_grad=False, n_out_grad=False):
         super().__init__()
-        self.n_in = nn.Parameter(torch.tensor(n_in, dtype=torch.float32))
-        self.n_out = nn.Parameter(torch.tensor(n_out, dtype=torch.float32))
+        self.n_in = nn.Parameter(torch.as_tensor(n_in), requires_grad=n_in_grad)
+        self.n_out = nn.Parameter(torch.as_tensor(n_out), requires_grad=n_out_grad)
 
     def _fresnel_reflectance(self, cos_i, cos_t):
         """

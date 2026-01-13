@@ -85,7 +85,7 @@ class Surface(nn.Module):
         # Consistent with transform.py: D_global = D_local @ R.T
         normal_global = normal_local @ self.transform.rot.T
 
-        return t, hit_global, normal_global
+        return t, hit_global, normal_global, hit_local, dir_local
 
     # --- Abstract Methods ---
 
@@ -330,3 +330,54 @@ class Quadric(Surface):
 
         return -local_normal
 
+
+class QuadricZY(Quadric):
+    """
+    A Cylindrical Quadric Surface where curvature is along the Y-axis.
+    Equation: z = (c * y^2) / (1 + sqrt(1 - (1+k) * c^2 * y^2))
+
+    Implicit form:
+    c(y^2) + c(1+k)z^2 - 2z = 0
+    (x is free/invariant)
+    """
+
+    def _get_coeffs(self, local_pos, local_dir):
+        """
+        Substitutes Ray P = O + tD into QuadricZY equation.
+        c(y^2) + c(1+k)z^2 - 2z = 0
+        """
+        # We only care about y and z components
+        oy, oz = local_pos[:, 1], local_pos[:, 2]
+        dy, dz = local_dir[:, 1], local_dir[:, 2]
+
+        c = self.c
+        k = self.k
+
+        # A = c(Dy^2) + c(1+k)Dz^2
+        A = c * dy ** 2 + c * (1 + k) * dz ** 2
+
+        # B = 2c(OyDy) + 2c(1+k)OzDz - 2Dz
+        B = 2 * c * (oy * dy) + 2 * c * (1 + k) * oz * dz - 2 * dz
+
+        # C = c(Oy^2) + c(1+k)Oz^2 - 2Oz
+        C = c * oy ** 2 + c * (1 + k) * oz ** 2 - 2 * oz
+
+        return A, B, C
+
+    def _getNormal(self, local_pos):
+        # Gradient of F(x,y,z) = c(y^2) + c(1+k)z^2 - 2z
+        # dx = 0
+        # dy = 2cy
+        # dz = 2c(1+k)z - 2
+
+        nx = torch.zeros_like(local_pos[:, 0])
+        ny = 2 * self.c * local_pos[:, 1]
+        nz = 2 * self.c * (1 + self.k) * local_pos[:, 2] - 2.0
+
+        raw_normal = torch.stack([nx, ny, nz], dim=1)
+
+        # Normalize
+        norm_len = torch.norm(raw_normal, dim=1, keepdim=True)
+        local_normal = raw_normal / (norm_len + 1e-8)
+
+        return -local_normal

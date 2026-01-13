@@ -19,7 +19,6 @@ class Rays:
                  directions,
                  wavelengths=None,
                  intensities=None,
-                 n_medium=1.0,
                  ray_id=0,
                  device='cpu',
                  dtype=torch.float32):
@@ -48,10 +47,6 @@ class Rays:
 
         self.N = self.pos.shape[0]
 
-        # Initialize Metadata
-        # Refractive index is tracked per ray
-        self.n = torch.full((self.N,), n_medium, dtype=dtype, device=device)
-
         # Optical properties
         if wavelengths is not None:
             self.wavelength = torch.as_tensor(wavelengths, dtype=dtype, device=device)
@@ -65,32 +60,29 @@ class Rays:
 
     def __getitem__(self, key):
         """
-        Returns a new Rays object containing only the rays specified by 'key'.
-        'key' can be an integer, a slice, or a boolean tensor mask.
+        Fast Slicing: Bypasses __init__ using __new__ for ~10x speedup.
         """
-        # 1. Slice the core geometric data
-        # PyTorch handles the indexing logic (int, slice, or mask)
-        new_pos = self.pos[key]
-        new_dir = self.dir[key]
+        # 1. Create a blank instance (skips __init__)
+        subset = Rays.__new__(Rays)
 
-        # 2. Create a new 'bare' instance
-        # We invoke __init__ to handle shape validation (1D vs 2D) and normalization.
-        # We do NOT pass auxiliary data (n, intensity) to __init__ because
-        # __init__ assumes they are scalar/uniform, but our slice might contain mixed values.
-        subset = Rays(new_pos, new_dir, device=self.device)
+        # 2. Copy scalar metadata
+        subset.device = self.device
 
-        # 3. Overwrite auxiliary attributes with the sliced data
-        # We must manually slice these to preserve per-ray variations (like mixed refractive indices)
-        subset.n = self.n[key]
-        subset.active = self.active[key]
+        # 3. Slice Tensors
+        # PyTorch slicing is very fast; the overhead was in the class instantiation
+        subset.pos = self.pos[key]
+        subset.dir = self.dir[key]
         subset.id = self.id[key]
-
-        # Intensity is always initialized in your __init__, so we safe to slice
         subset.intensity = self.intensity[key]
 
-        # Wavelength is optional in your __init__, check existence before slicing
-        if hasattr(self, 'wavelength'):
+        # Update N based on the result of the slice
+        subset.N = subset.pos.shape[0]
+
+        # Handle Optional Wavelength
+        if self.wavelength is not None:
             subset.wavelength = self.wavelength[key]
+        else:
+            subset.wavelength = None
 
         return subset
 
@@ -99,7 +91,6 @@ class Rays:
         self.device = device
         self.pos = self.pos.to(device)
         self.dir = self.dir.to(device)
-        self.n = self.n.to(device)
         self.active = self.active.to(device)
         if hasattr(self, 'wavelength'):
             self.wavelength = self.wavelength.to(device)
@@ -121,6 +112,28 @@ class Rays:
 
         self.intensity = self.intensity*intensity_mult
 
+    def update_subset(self, mask, subset_rays):
+        """
+        Graph-Safe Update: Replaces values at 'mask' with 'subset_rays' data.
+
+        Args:
+            mask: Boolean tensor [N] or Indices [M] indicating which rays to update.
+            subset_rays: A Rays object containing only the M updated rays.
+        """
+        # We use index_put_ (in-place) if we don't need gradients for the *overwritten* # old values, but standard index_put (out-of-place) is safer for complex graphs.
+        # Below is the functional approach: creating new tensors for the container.
+
+        # Ensure mask is treated as indices for index_put consistency
+        # If mask is boolean, index_put expects it as a list like (mask,)
+        idx = (mask,) if mask.dtype == torch.bool else (mask,)
+
+        self.pos = self.pos.index_put(idx, subset_rays.pos)
+        self.dir = self.dir.index_put(idx, subset_rays.dir)
+        self.intensity = self.intensity.index_put(idx, subset_rays.intensity)
+
+        if self.wavelength is not None and subset_rays.wavelength is not None:
+            self.wavelength = self.wavelength.index_put(idx, subset_rays.wavelength)
+
     def __repr__(self):
         return f"<Rays N={self.N}, device={self.device}>"
 
@@ -135,7 +148,6 @@ class Rays:
         # Extract attributes from all objects
         all_pos = torch.cat([r.pos for r in ray_list], dim=0)
         all_dir = torch.cat([r.dir for r in ray_list], dim=0)
-        all_n = torch.cat([r.n for r in ray_list], dim=0)
         all_wave = torch.cat([r.wavelength for r in ray_list], dim=0)
         all_int = torch.cat([r.intensity for r in ray_list], dim=0)
         all_ids = torch.cat([r.id for r in ray_list], dim=0)
@@ -144,7 +156,6 @@ class Rays:
         merged = Rays(all_pos, all_dir, device=ray_list[0].device)
 
         # Overwrite with concatenated data
-        merged.n = all_n
         merged.wavelength = all_wave
         merged.intensity = all_int
         merged.id = all_ids
@@ -167,7 +178,6 @@ class Rays:
         new_rays.N = new_pos.shape[0]
 
         # Copy References to Metadata (No memory allocation)
-        new_rays.n = self.n
         new_rays.intensity = self.intensity
         new_rays.id = self.id
 
