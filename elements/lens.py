@@ -45,7 +45,7 @@ class SingletLens(Element):
             sf3 = refractFunc(n_in=0.0, n_out=0.0)
             sf3.n_in = self.n_glass
             sf3.n_out = self.n_media
-            
+
         self.surface_functions.append(sf3)
 
 

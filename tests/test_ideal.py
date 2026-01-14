@@ -120,7 +120,7 @@ def test_magnification_and_gradients():
     print("\n--- Testing Magnification and Gradients ---")
 
     f_physical = 100.0
-    lens = IdealThinLens(focal=f_physical, transform = RayTransform(rota))
+    lens = IdealThinLens(focal=f_physical)
 
     # --- Setup Differentiable Object Position ---
     # Object at Z = -300 (3f). Expected Image at 1.5f = 150.
