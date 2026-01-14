@@ -329,7 +329,7 @@ class DoubletLens(Element):
         return Zs, Mats
 
 
-class TripletLens(Doublet):
+class TripletLens(Element):
 
     def __init__(self, c1, c2, c3, c4, d, t1, t2, t3,
                  ior_glass1, ior_glass2, ior_glass3, ior_media=1.0,
@@ -339,7 +339,7 @@ class TripletLens(Doublet):
                  ior_glass3_grad=False, ior_media_grad=False,
                  fresnel=False, inked=True, transform=None):
 
-        super().super().__init__()
+        super().__init__()
 
         # Register Optical Parameters
         self.ior_glass1 = nn.Parameter(torch.as_tensor(ior_glass1), requires_grad=ior_glass1_grad)

@@ -82,7 +82,7 @@ class Shape(nn.Module):
         local_rays = rays.with_coords(local_pos, local_dir)
 
         # 2. Call child intersection (Returns results in Element Frame)
-        t, hit_elem, normal_elem, hit_local, dir_local = self.surfaces[surf_idx](local_rays)
+        t, hit_elem, normal_elem, hit_local = self.surfaces[surf_idx](local_rays)
 
         # A. Hit Point: Recompute in global to ensure graph consistency
         hit_point_global = rays.pos + t.unsqueeze(1) * rays.dir

@@ -108,7 +108,7 @@ class Rays:
         # and just ignore the 'inactive' ones during loss calculation.
 
         self.pos = new_pos
-        self.dir = F.normalize(new_dir, p=2, dim=1)
+        self.dir = new_dir
 
         self.intensity = self.intensity*intensity_mult
 
