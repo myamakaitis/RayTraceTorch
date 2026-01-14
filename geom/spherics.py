@@ -50,7 +50,7 @@ class Spheric(Shape):
 
     @property
     def T_edge(self):
-        self.surfaces[self.N_optical-1].sagittalZ(self.radius) - self.surfaces[0].sagittalZ(self.radius)
+        return self.surfaces[self.N_optical-1].sagittalZ(self.radius) - self.surfaces[0].sagittalZ(self.radius)
 
 class Singlet(Spheric):
     """
