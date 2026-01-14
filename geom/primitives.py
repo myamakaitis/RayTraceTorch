@@ -97,6 +97,12 @@ class Surface(nn.Module):
         """Child classes must implement the math to find t."""
         raise NotImplementedError
 
+    @property
+    def z(self):
+        return self.transform.trans[2]
+
+    def __len__(self):
+        return 1
 
 class Plane(Surface):
     """

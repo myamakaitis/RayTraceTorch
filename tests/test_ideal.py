@@ -64,6 +64,8 @@ def test_thin_lens_conjugate_points():
     f_physical = 100.0
     lens = IdealThinLens(focal=f_physical)
 
+
+
     # 1. Define Point Source at Z = -200 (so = 200)
     so = 2 * f_physical
     origin = [0.0, 0.0, -so]
@@ -104,6 +106,13 @@ def test_thin_lens_conjugate_points():
     # Verify stigmatic imaging (low standard deviation)
     assert std_si < 1e-3, "Rays did not converge to a sharp point"
     print("Conjugate Point Test Passed.")
+
+    print(f"Paraxial Lens matrix")
+    print(lens.getParaxial()[1][0].numpy())
+
+    print(f"Paraxial lens matrix (shifted)")
+    lens.shape.transform.trans[0] = 4
+    print(lens.getParaxial()[1][0].numpy())
 
 
 def test_magnification_and_gradients():

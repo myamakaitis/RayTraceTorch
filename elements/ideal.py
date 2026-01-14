@@ -6,6 +6,36 @@ from .parent import Element
 from ..geom import Plane, Disk
 from ..phys import Linear
 
+def ParaxialLensMat(lens_power_x, lens_power_y):
+
+    Mat = torch.eye(5, device=lens_power_x.device, dtype=lens_power_x.dtype)
+    Mat = Mat.index_put((torch.tensor([1, 3]), torch.tensor([0, 2])),
+                        torch.stack([-lens_power_x, -lens_power_y]))
+
+    return Mat
+
+def ParaxialDistMat(dist):
+
+    Mat = torch.eye(5, device=dist.device, dtype=dist.dtype)
+    Mat = Mat.index_put((torch.tensor([0, 2]), torch.tensor([1, 3])),
+                        torch.stack([dist, dist]))
+
+    return Mat
+
+def ParaxialRefractMat(Cx, Cy, ior_1, ior_2):
+
+    vals = torch.stack([
+        Cx * (ior_1 - ior_2) / ior_2,
+        Cy * (ior_1 - ior_2) / ior_2,
+        ior_1/ior_2,
+        ior_1/ior_2])
+
+    Mat = torch.eye(5, device=ior_1.device, dtype=ior_1.dtype)
+    Mat = Mat.index_put((torch.tensor([1, 3, 1, 3]), torch.tensor([0, 2, 1, 3])),
+                        vals)
+
+    return Mat
+
 class LinearElement(Element):
 
     def __init__(self, shape : Plane, linSurfFunc : Linear):
@@ -18,7 +48,12 @@ class LinearElement(Element):
         linSurfFunc.transform = shape.transform
 
         self.surface_functions.append(linSurfFunc)
-        self.Nsurfaces = 1
+
+    def _paraxial(self):
+
+        Cx, Cy = self.surface_functions[0].Cx, self.surface_functions[0].Cy
+
+        return ParaxialLensMat(-Cx, -Cy)
 
 
 class IdealThinLens(LinearElement):

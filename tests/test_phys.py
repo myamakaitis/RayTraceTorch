@@ -9,7 +9,7 @@ def test_tir_logic():
     device = 'cpu'
     # Glass (1.5) -> Air (1.0)
     # Critical angle is approx 41.8 degrees.
-    refract_op = RefractSnell(n_in=1.5, n_out=1.0)
+    refract_op = RefractSnell(ior_in=1.5, ior_out=1.0)
 
     # Normal points +Y (0, 1, 0)
     normal = torch.tensor([[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]])
@@ -46,7 +46,7 @@ def test_fresnel_probability():
     device = 'cpu'
     # Air -> Glass (n=1.5)
     # Normal incidence R = ((1-1.5)/(1+1.5))^2 = (-0.5/2.5)^2 = 0.2^2 = 0.04 (4%)
-    refract_op = RefractFresnel(n_in=1.0, n_out=1.5)
+    refract_op = RefractFresnel(ior_in=1.0, ior_out=1.5)
 
     # 1. Create a large batch of identical rays for statistics
     N = 100000
@@ -78,7 +78,7 @@ def test_tir_deterministic():
     device = 'cpu'
     # Glass (1.5) -> Air (1.0)
     # Critical Angle ~41.8 deg.
-    refract_op = RefractFresnel(n_in=1.5, n_out=1.0)
+    refract_op = RefractFresnel(ior_in=1.5, ior_out=1.0)
 
     # Incidence at 60 deg (Steep) -> 100% TIR
     # Ray (sin60, cos60) against Normal (0,1)

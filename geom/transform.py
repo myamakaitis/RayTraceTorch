@@ -99,6 +99,26 @@ class RayTransform(nn.Module):
 
         return global_pos, global_dir
 
+    def paraxial(self):
+
+        affine_vector = -torch.stack([self.trans[0], self.rot_vec[0], self.trans[1], self.rot_vec[1], -torch.tensor(1.0)]).unsqueeze(1)
+
+        zeros = torch.eye(5 , device=self.trans.device, dtype=self.trans.dtype)[:, :4]
+
+        Mat = torch.cat([zeros, affine_vector], dim=1)
+
+        return Mat
+
+    def paraxial_inv(self):
+
+        affine_vector = torch.stack([self.trans[0], self.rot_vec[0], self.trans[1], self.rot_vec[1], torch.tensor(1.0)]).unsqueeze(1)
+
+        zeros = torch.eye(5 , device=self.trans.device, dtype=self.trans.dtype)[:, :4]
+
+        Mat = torch.cat([zeros, affine_vector], dim=1)
+
+        return Mat
+
 class NoisyTransform(RayTransform):
     """
     Transform class that selectively adds random perturbations with a normal distribution to rotation and translation

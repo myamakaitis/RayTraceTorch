@@ -14,7 +14,6 @@ class Element(nn.Module):
     2. Maps each surface in the Shape to a physical interaction model (SurfaceFunction).
     3. Orchestrates the interaction: Geometry -> Hit -> Physics -> New Ray State.
     """
-
     def __init__(self):
         """
         Args:
@@ -27,7 +26,6 @@ class Element(nn.Module):
 
         self.shape = None
         self.surface_functions = nn.ModuleList()
-        self.Nsurfaces = 0
 
     def intersectTest(self, rays):
         """
@@ -60,19 +58,13 @@ class Element(nn.Module):
         return new_pos_global, new_dir_global, intensity_mult
 
 
-class SingleSurfFunc(Element):
+    def _paraxial(self):
 
-    def __init__(self, shape, surfaceFunc):
+        return torch.eye(5, device=self.shape.transform.trans.device, dtype=self.shape.transform.trans.dtype)
 
-        super().__init__()
+    def getParaxial(self):
 
-        self.shape = shape
-        if hasattr(shape, surfaces):
-            self.Nsurfaces = len(surfaceFunc.surfaces)
-        else:
-            self.Nsurfaces = 1
+        T = self.shape.transform.paraxial()
+        T_inv = self.shape.transform.paraxial_inv()
 
-        for _ in range(self.Nsurfaces):
-            self.surface_functions.append(surfaceFunc)
-
-
+        return [self.shape.z], [T_inv @ self._paraxial() @ T]

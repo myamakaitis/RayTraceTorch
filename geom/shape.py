@@ -100,6 +100,14 @@ class Shape(nn.Module):
         """
         raise NotImplementedError
 
+    @property
+    def z(self):
+        return self.transform.trans[2]
+
+    def __len__(self):
+
+        return len(self.surfaces)
+
 class CvxPolyhedron(Shape):
 
     def __init__(self, planes_list = None, transform=None):
