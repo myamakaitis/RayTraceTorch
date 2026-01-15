@@ -1,6 +1,7 @@
 import torch
 import math
 from .ray import Rays
+import torch.nn.functional as F
 
 def _generate_basis_from_direction(direction, device):
     """
@@ -8,7 +9,7 @@ def _generate_basis_from_direction(direction, device):
     This allows us to create 2D shapes (disks/cones) and rotate them to point anywhere.
     """
     w = torch.as_tensor(direction, dtype=torch.float32, device=device)
-    w = w / torch.norm(w)  # Normalize primary axis
+    w = F.normalize(w, p=2)  # Normalize primary axis
 
     # Arbitrary 'up' vector to compute orthogonal axes
     # If w is close to global Y [0,1,0], use X [1,0,0] as temp up to avoid singularity
@@ -18,10 +19,10 @@ def _generate_basis_from_direction(direction, device):
         temp_up = torch.tensor([0.0, 1.0, 0.0], device=device)
 
     u = torch.cross(temp_up, w)
-    u = u / torch.norm(u)
+    u = F.normalize(u, p=2)
 
     v = torch.cross(w, u)
-    v = v / torch.norm(v)
+    v = F.normalize(v, p=2)
 
     # Return shape [3, 3] where rows are u, v, w
     # We can use this to rotate local vectors: v_global = v_local @ basis
@@ -84,6 +85,34 @@ def collimatedSource(origin, direction, radius, N_rays, ray_id=0, device='cpu'):
     return Rays(final_origins, final_dirs, ray_id=ray_id, device=device)
 
 
+def collimatedLineSource(center, ray_direction, line_direction, length, N_rays, ray_id=1, 
+                         device='cpu', dtype=torch.float32):
+
+    direction = torch.as_tensor(ray_direction).repeat(N_rays, 3)
+    
+    line_direction = F.normalize(line_direction, 2)
+
+    origins = length * torch.linspace(-0.5, 0.5, N_rays)[:, None] * line_direction[None, :] + center[None, :]
+    
+    return Rays(origins, direction, ray_id=ray_id, device=device, dtype=dtype)
+
+
+def fanSource(center, ray_direction, fan_angle, fan_direction, N_rays, ray_id, device='cpu', dtype=torch.float32):
+    
+    origin = torch.as_tensor(center).repeat(N_rays, 3)
+
+    thetas = torch.linspace(-fan_angle/2, fan_angle/2, N_rays)
+    directions = ray_direction[None, :] * torch.cos(thetas)[:, None] + fan_direction[None, :] * torch.sin(thetas)[:, None]
+    directions = F.normalize(directions)
+
+
+    return Rays(origin, directions, ray_id=ray_id, device=device, dtype = dtype)
+
+
+
+
+
+
 def pointSource(origin, direction, half_angle_rad, N_rays, ray_id=1, device='cpu'):
     """
     Creates a diverging cone of rays from a point source.
@@ -120,7 +149,7 @@ def pointSource(origin, direction, half_angle_rad, N_rays, ray_id=1, device='cpu
     final_dirs = local_dirs @ R
 
     # 3. Origins (all at the source point)
-    final_origins = origin.expand(N_rays, 3)
+    final_origins = origin.repeat(N_rays, 3)
 
     return Rays(final_origins, final_dirs, ray_id=ray_id, device=device)
 
@@ -154,6 +183,6 @@ def gaussianBeam(origin, direction, waist_radius, N_rays, ray_id=0, device='cpu'
 
     # 3. Directions (Parallel at the waist)
     final_dirs = torch.as_tensor(direction, dtype=torch.float32, device=device)
-    final_dirs = final_dirs.unsqueeze(0).expand(N_rays, 3)
+    final_dirs = final_dirs.unsqueeze(0).repeat(N_rays, 3)
 
     return Rays(final_origins, final_dirs, ray_id=ray_id, device=device)
