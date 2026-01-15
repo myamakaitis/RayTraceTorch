@@ -155,7 +155,3 @@ def test_gaussianBeam():
 
     # --- Visualization ---
     save_plot(rays, "gaussian_bundle.png", "Gaussian Bundle (Waist=1.0)")
-
-
-if __name__ == "__main__":
-    run_tests()

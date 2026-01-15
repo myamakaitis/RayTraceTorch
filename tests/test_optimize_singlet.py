@@ -24,8 +24,8 @@ def test_singlet_optimization():
     # Initial Lens Parameters
     # We start with a roughly biconvex lens, but allow it to evolve
     # C = 1/R. 0.02 is R=50.
-    init_c1 = 0.016667 # goal = 0.016667
-    init_c2 = -0.00283 # goal = -0.00283
+    init_c1 = -0.016667 # goal = 0.016667
+    init_c2 = 0.00283 # goal = -0.00283
     thickness = 4.0 # goal = 4.0
     diameter = 25.4
     ior = 1.5168
@@ -47,8 +47,7 @@ def test_singlet_optimization():
     ).to(device)
 
     # Optimizer
-    # Note: Weight decay is set to 0 as requested
-    optimizer = torch.optim.Adam(lens.parameters(), lr=1e-2, weight_decay=0.0)
+    optimizer = torch.optim.Adam(lens.parameters(), lr=1e-3, weight_decay=0.0)
 
     print(f"--- Starting Optimization on {device} ---")
     print(f"--- Initial Focal Length: {lens.f:.2f} ---")
@@ -57,7 +56,7 @@ def test_singlet_optimization():
     # ---------------------------------------------------------
     # 2. Optimization Loop
     # ---------------------------------------------------------
-    steps = 1
+    steps = 10000
 
     for i in range(steps):
         optimizer.zero_grad()
@@ -157,3 +156,8 @@ def test_singlet_optimization():
                   "Theoretical optimum depends on exact conjugate ratio (object at infinity vs finite).")
     else:
         print("C2 is near zero (Plano-convex).")
+
+
+if __name__ == "__main__":
+
+    test_singlet_optimization()

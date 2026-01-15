@@ -99,7 +99,7 @@ class Reflect(SurfaceFunction):
 
         # 2. Vector Reflection
         # Note: This assumes 'normal' is normalized.
-        reflect_dir = ray_dir - 2 * cos_theta * normal
+        out_dir = ray_dir - 2 * cos_theta * normal
 
         intensity_mod = torch.ones_like(ray_dir[:, 0])
 
@@ -123,7 +123,7 @@ class RefractSnell(SurfaceFunction):
         # Calculate dot product (cos theta_in)
         # ray_dir and normal should be normalized.
 
-        mu = self.ior_in / self.ior_out
+        mu = self.ior_out / self.ior_in
 
         dot = torch.sum(ray_dir * normal, dim=1, keepdim=True)
 
@@ -227,7 +227,7 @@ class RefractFresnel(SurfaceFunction):
         # 2. Compute Refraction Angle (Snell's Law)
         # sin^2(t) = mu^2 * sin^2(i)
         # sin^2(i) = 1 - cos^2(i)
-        mu = self.ior_in / self.ior_out
+        mu = self.ior_out / self.ior_in
         sin2_t = (mu ** 2) * (1.0 - cos_i ** 2)
 
         # Check TIR
