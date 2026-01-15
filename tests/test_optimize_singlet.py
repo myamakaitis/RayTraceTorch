@@ -17,6 +17,7 @@ def test_singlet_optimization():
     # 1. Setup Configuration
     # ---------------------------------------------------------
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(device)
 
     # Target focal plane
     target_z = 100.0
@@ -24,8 +25,8 @@ def test_singlet_optimization():
     # Initial Lens Parameters
     # We start with a roughly biconvex lens, but allow it to evolve
     # C = 1/R. 0.02 is R=50.
-    init_c1 = -0.016667 # goal = 0.016667
-    init_c2 = 0.00283 # goal = -0.00283
+    init_c1 = 0.00283 #-0.016667 # goal = 0.016667
+    init_c2 = -0.016667 #0.00283 # goal = -0.00283
     thickness = 4.0 # goal = 4.0
     diameter = 25.4
     ior = 1.5168
@@ -47,7 +48,7 @@ def test_singlet_optimization():
     ).to(device)
 
     # Optimizer
-    optimizer = torch.optim.Adam(lens.parameters(), lr=1e-3, weight_decay=0.0)
+    optimizer = torch.optim.LBFGS(lens.parameters(), lr=1e-1)
 
     print(f"--- Starting Optimization on {device} ---")
     print(f"--- Initial Focal Length: {lens.f:.2f} ---")
@@ -58,7 +59,8 @@ def test_singlet_optimization():
     # ---------------------------------------------------------
     steps = 10000
 
-    for i in range(steps):
+
+    def closure():
         optimizer.zero_grad()
 
         # A. Generate Rays
@@ -70,7 +72,7 @@ def test_singlet_optimization():
             origin=[0, 0, -20],
             direction=[0, 0, 1],
             radius=5,
-            N_rays=50,
+            N_rays=5000,
             device=device
         )
 
@@ -108,26 +110,28 @@ def test_singlet_optimization():
 
         # F. Backprop
         mse_loss.backward()
-        optimizer.step()
 
-        # Monitoring
-        if i % 100 == 0:
-            print(f"Step {i:04d} | Loss (MSE): {mse_loss.item():.6f} | Spot RMS: {rms_spot.item():.4f}")
+        # # Monitoring
+        # if i % 100 == 0:
+        print(f" | Loss (MSE): {mse_loss.item():.6f} | Spot RMS: {rms_spot.item():.4f} | focal: {lens.f:.2f}")
 
-        # ---------------------------------------------------------
-        # 3. Final Verification
-        # ---------------------------------------------------------
+        return mse_loss
 
-    with torch.no_grad():
 
-        fig, ax = plt.subplots(2)
-        # p [N x 3]
-        Pall = torch.stack([p0, p1, p2, p3], dim=0).cpu().detach().numpy() # [K x N x 3]
+    for i in range(steps):
+        optimizer.step(closure)
 
-        ax[0].plot(Pall[:, :, 2], Pall[:, :, 0])
-        ax[1].plot(Pall[:, :, 2], Pall[:, :, 1])
 
-    fig.show()
+    # with torch.no_grad():
+    #
+    #     fig, ax = plt.subplots(2)
+    #     # p [N x 3]
+    #     Pall = torch.stack([p0, p1, p2, p3], dim=0).cpu().detach().numpy() # [K x N x 3]
+    #
+    #     ax[0].plot(Pall[:, :, 2], Pall[:, :, 0])
+    #     ax[1].plot(Pall[:, :, 2], Pall[:, :, 1])
+    #
+    # fig.show()
 
     final_c1 = lens.shape.surfaces[0].c.item()
     final_c2 = lens.shape.surfaces[1].c.item()
