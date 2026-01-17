@@ -21,7 +21,7 @@ class SequentialSystem(nn.Module):
             for i in range(len(element.shape)):
 
                 # Intersection test
-                t = surfaces[i].intersectTest(rays)   # (N,)
+                t = element.intersectTest(rays)[:, i]   # (N,)
                 ray_mask = t < float('inf')
 
                 if not torch.any(ray_mask):
@@ -33,11 +33,7 @@ class SequentialSystem(nn.Module):
                 # Apply surface interaction
                 new_pos, new_dir, intensity_mod = element(rays_valid, i)
 
-                # Update valid rays
-                rays_valid.update(new_pos, new_dir, intensity_mod)
-
-                # Scatter back into full ray set
-                rays.update_subset(rays_valid, ray_mask)
+                rays.scatter_update(ray_mask, new_pos, new_dir, intensity_mod)
 
         return rays
 
@@ -60,12 +56,9 @@ class SequentialSystem(nn.Module):
         all_Z = torch.as_tensor(all_Z)
         dZ = all_Z[1:] - all_Z[:-1]
 
-        for i in range(1, len(all_M)):
-
+        for i in range(0, len(all_M)-1):
             # Apply surface matrix
-            M_sys = all_M[i] @ M_sys
-
-            D = ParaxialDistMat(dZ[i-1])
-            M_sys = D @ M_sys
+            M_sys = ParaxialDistMat(dZ[i]) @ M_sys
+            M_sys = all_M[i+1] @ M_sys
 
         return M_sys

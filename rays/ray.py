@@ -32,6 +32,7 @@ class Rays:
             device: 'cpu' or 'cuda'.
         """
         self.device = device
+        self.dtype=dtype
 
         # Ensure inputs are Float Tensors [N, 3]
         self.pos = torch.as_tensor(origins, dtype=dtype, device=device)
@@ -64,9 +65,8 @@ class Rays:
         """
         # 1. Create a blank instance (skips __init__)
         subset = Rays.__new__(Rays)
-
-        # 2. Copy scalar metadata
         subset.device = self.device
+        subset.dtype = self.dtype
 
         # 3. Slice Tensors
         # PyTorch slicing is very fast; the overhead was in the class instantiation
@@ -91,7 +91,6 @@ class Rays:
         self.device = device
         self.pos = self.pos.to(device)
         self.dir = self.dir.to(device)
-        self.active = self.active.to(device)
         if hasattr(self, 'wavelength'):
             self.wavelength = self.wavelength.to(device)
         self.intensity = self.intensity.to(device)
@@ -112,27 +111,29 @@ class Rays:
 
         self.intensity = self.intensity*intensity_mult
 
-    def update_subset(self, mask, subset_rays):
+    def scatter_update(self, mask, new_pos, new_dir, intensity_mod):
         """
-        Graph-Safe Update: Replaces values at 'mask' with 'subset_rays' data.
+        Differentiable, Graph-Safe Update.
 
         Args:
-            mask: Boolean tensor [N] or Indices [M] indicating which rays to update.
-            subset_rays: A Rays object containing only the M updated rays.
+            mask: Boolean tensor [N] indicating which rays to update.
+            new_pos: Tensor [M, 3] new positions for the active rays.
+            new_dir: Tensor [M, 3] new directions for the active rays.
+            intensity_mod: Tensor [M] or scalar multiplier for intensity.
         """
-        # We use index_put_ (in-place) if we don't need gradients for the *overwritten* # old values, but standard index_put (out-of-place) is safer for complex graphs.
-        # Below is the functional approach: creating new tensors for the container.
 
-        # Ensure mask is treated as indices for index_put consistency
-        # If mask is boolean, index_put expects it as a list like (mask,)
-        idx = (mask,) if mask.dtype == torch.bool else (mask,)
+        # Format mask for index_put (expects tuple of indices or boolean masks)
+        idx = (mask,)
 
-        self.pos = self.pos.index_put(idx, subset_rays.pos)
-        self.dir = self.dir.index_put(idx, subset_rays.dir)
-        self.intensity = self.intensity.index_put(idx, subset_rays.intensity)
+        # Update Position and Direction
+        self.pos = self.pos.index_put(idx, new_pos)
+        self.dir = self.dir.index_put(idx, new_dir)
 
-        if self.wavelength is not None and subset_rays.wavelength is not None:
-            self.wavelength = self.wavelength.index_put(idx, subset_rays.wavelength)
+        # Update Intensity (Multiplicative)
+        # We need to slice the current intensity, multiply, and put it back
+        current_subset_intensity = self.intensity[mask]
+        new_intensity = current_subset_intensity * intensity_mod
+        self.intensity = self.intensity.index_put(idx, new_intensity)
 
     def __repr__(self):
         return f"<Rays N={self.N}, device={self.device}>"

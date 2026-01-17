@@ -38,7 +38,7 @@ class Shape(nn.Module):
         t_list = []
         # Iterate over all surfaces in the shape
         for i, surf in enumerate(self.surfaces):
-            # A. Raw Intersection (Infinite Surface)
+            # 1. Raw Intersection
             t = surf.intersectTest(local_rays)
 
             # 2. Hit Points
