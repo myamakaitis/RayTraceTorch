@@ -31,9 +31,6 @@ class Shape(nn.Module):
         Returns:
             t_matrix (Tensor): [N, K] where K is len(self.surfaces).
         """
-        if not self.surfaces:
-            return torch.zeros((rays.N, 0), device=self.device)
-
         # 1. Transform Global -> Local (Element Space)
         local_pos, local_dir = self.transform.transform(rays)
         local_rays = rays.with_coords(local_pos, local_dir)
@@ -44,20 +41,13 @@ class Shape(nn.Module):
             # A. Raw Intersection (Infinite Surface)
             t = surf.intersectTest(local_rays)
 
-            # B. Validate Intersection with 'inside' check
-            # We only check points where t is finite to avoid NaNs
-            hit_mask = t < float('inf')
-
-            # Create a safe t tensor for position calculation (replace inf with 0)
-            # t_safe = torch.where(hit_mask, t, torch.zeros_like(t))
+            # 2. Hit Points
             hit_point = local_pos + t.unsqueeze(1) * local_dir
 
-            # Check if the hit point is valid for this specific surface
-            # We pass the surface index so the shape knows which boundary logic to apply
-            is_valid = self.inBounds(hit_point, i)
-
-            # Combine: Must hit the math surface AND be inside the physical bounds
-            valid_mask = hit_mask & is_valid
+            # 3. Check Validity
+            is_finite = t < float('inf')
+            is_in_bounds = self.inbounds(hit_point, surf)
+            valid_mask = is_finite & is_in_bounds
 
             t_final = torch.where(valid_mask, t, torch.full_like(t, float('inf')))
             t_list.append(t_final)

@@ -4,7 +4,7 @@ from IPython.core.completer import MatcherAPIv1
 
 from .parent import Element
 from ..phys import RefractSnell, RefractFresnel, Block
-from ..geom import Singlet, CylSinglet
+from ..geom import Singlet, CylSinglet, Doublet, Triplet
 from .ideal import ParaxialRefractMat
 
 class SingletLens(Element):
@@ -174,19 +174,8 @@ class SingletLens(Element):
             self.shape.C1.copy_(c1_new)
             self.shape.C2.copy_(c2_new)
 
-    def status(self):
-        print(f"---")
-        print(f"R1: {self.R1}")
-        print(f"R2: {self.R2}")
-        print(f"ior_media: {self.ior_media}")
-        print(f"ior_glass: {self.ior_glass}")
-        print(f"Center T: {self.T}")
-        print("---")
-        print(f"EFL: {self.f}")
-        print(f"BLF: {self.f_bfl}")
-        print(f"FFL: {self.f_ffl}")
-        print(f"P1: {self.P1z}")
-        print(f"P2: {self.P2z}")
+    def __repr__(self):
+        return f"{self.__name__} - f = {self.f}"
 
 
 class CylSingletLens(SingletLens):

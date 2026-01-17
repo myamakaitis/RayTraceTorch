@@ -25,8 +25,8 @@ def test_singlet_optimization():
     # Initial Lens Parameters
     # We start with a roughly biconvex lens, but allow it to evolve
     # C = 1/R. 0.02 is R=50.
-    init_c1 = 0.00283 #-0.016667 # goal = 0.016667
-    init_c2 = -0.016667 #0.00283 # goal = -0.00283
+    init_c1 = 0.016667 # 0.00283 #-0.016667 # goal = 0.016667
+    init_c2 = -0.00283 # 0.016667 #0.00283 # goal = -0.00283
     thickness = 4.0 # goal = 4.0
     diameter = 25.4
     ior = 1.5168
@@ -48,7 +48,7 @@ def test_singlet_optimization():
     ).to(device)
 
     # Optimizer
-    optimizer = torch.optim.LBFGS(lens.parameters(), lr=1e-1)
+    optimizer = torch.optim.LBFGS(lens.parameters(), lr=1e-2)
 
     print(f"--- Starting Optimization on {device} ---")
     print(f"--- Initial Focal Length: {lens.f:.2f} ---")
@@ -57,7 +57,7 @@ def test_singlet_optimization():
     # ---------------------------------------------------------
     # 2. Optimization Loop
     # ---------------------------------------------------------
-    steps = 10000
+    steps = 100
 
 
     def closure():
@@ -71,7 +71,7 @@ def test_singlet_optimization():
         rays = collimatedSource(
             origin=[0, 0, -20],
             direction=[0, 0, 1],
-            radius=5,
+            radius=12,
             N_rays=5000,
             device=device
         )

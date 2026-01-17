@@ -104,6 +104,10 @@ class Surface(nn.Module):
     def __len__(self):
         return 1
 
+    @property
+    def surfaces(self):
+        return (self,)
+
 class Plane(Surface):
     """
     An infinite flat plane.
