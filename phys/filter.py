@@ -5,8 +5,6 @@ from ..geom.transform import RayTransform
 
 from .std import Transmit
 
-
-
 class Fuzzy(Transmit):
 
     def __init__(self, intensity_function : callable):

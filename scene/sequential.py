@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+from .base import Scene
 from ..elements import ParaxialDistMat
 
 class SequentialSystem(nn.Module):
@@ -9,14 +9,12 @@ class SequentialSystem(nn.Module):
         super().__init__()
         self.elements = nn.ModuleList(elements)
 
-    def forward(self, rays):
+    def simulate(self, rays):
         """
         Propagate rays sequentially through all elements and surfaces.
         Assumes fixed traversal order.
         """
         for element in self.elements:
-
-            surfaces = element.shape.surfaces
 
             for i in range(len(element.shape)):
 
@@ -62,3 +60,17 @@ class SequentialSystem(nn.Module):
             M_sys = all_M[i+1] @ M_sys
 
         return M_sys
+
+    def checkDimensions(self):
+
+        """
+        Check that the physical dimensions of the system are physically realizable
+        """
+
+        center_thickness = self._getCenterThickness()
+        edge_thickness = self._getEdgeThickness()
+
+        center_clearance = self._getCenterClearance()
+        edge_clearance = self._getEdgeClearance()
+
+

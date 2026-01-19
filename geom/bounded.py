@@ -1,7 +1,8 @@
 
 import torch
+import torch.nn as nn
 from .transform import RayTransform
-from .primitives import Surface, Plane, Sphere, Quadric, QuadricZY
+from .primitives import Surface, Plane, Sphere, Quadric, QuadricZY, intersectEpsilon
 
 class SurfaceBounded(Surface):
     """
@@ -26,7 +27,7 @@ class SurfaceBounded(Surface):
         if self.invert:
             keep = ~keep
 
-        t_stack = t_stack.masked_fill((t_stack <= 0) | ~keep , float('inf'))
+        t_stack = t_stack.masked_fill((t_stack <= intersectEpsilon) | ~keep , float('inf'))
 
         t_min, _ = torch.min(t_stack, dim=0)
 
@@ -52,7 +53,7 @@ class Disk(Plane, SurfaceBounded):
 
     def __init__(self, radius, transform = None):
         super().__init__()
-        self.radius = nn.Parmeter(torch.as_tensor(radius), requires_grad=False)
+        self.radius = nn.Parameter(torch.as_tensor(radius), requires_grad=False)
 
     def inBounds(self, local_pos):
         # r^2 = x^2 + y^2
@@ -96,10 +97,10 @@ class Ellipse(Plane, SurfaceBounded):
 
         cos_rot, sin_rot = torch.cos(self.rot), torch.sin(self.rot)
 
-        dir_maj = local_pos[:, 0] * cos_rot - local_pos[:, 1] * sin_rot
+        dir_major = local_pos[:, 0] * cos_rot - local_pos[:, 1] * sin_rot
         dir_minor = local_pos[:, 0] * sin_rot + local_pos[:, 1] * cos_rot
 
-        return ((dir_major/self.r_major)**2 + (dir_minor/r_minor)**2) <= 1.0
+        return ((dir_major/self.r_major)**2 + (dir_minor/self.r_minor)**2) <= 1.0
 
 
 class HalfSphere(Quadric, SurfaceBounded):
@@ -120,7 +121,7 @@ class HalfSphere(Quadric, SurfaceBounded):
         # Check: sign(z) != sign(R)
         # Equivalent to: z * R < 0
         z = local_pos[:, 2]
-        return torch.abs(z * self.c) < 1.001
+        return torch.abs(z * self.c) < 1 + intersectEpsilon
 
     def sagittalZ(self, radius):
         """Calculates Z-coordinate of the surface edge relative to vertex Z."""
@@ -147,7 +148,7 @@ class HalfCyl(QuadricZY, SurfaceBounded):
     def inBounds(self, local_pos):
         # Check validity similar to HalfSphere: sign(z) != sign(R) => z*c < 1 (approx)
         z = local_pos[:, 2]
-        return torch.abs(z * self.c) < 1.001
+        return torch.abs(z * self.c) < 1 + intersectEpsilon
 
     def sagittalZ(self, y_height):
         """Calculates Z-coordinate of the surface at a specific Y height."""

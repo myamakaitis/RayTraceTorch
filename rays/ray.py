@@ -59,7 +59,7 @@ class Rays:
 
         self.id = torch.full((self.N,), ray_id, dtype=torch.long, device=device)
 
-    def __getitem__(self, key):
+    def subset(self, key):
         """
         Fast Slicing: Bypasses __init__ using __new__ for ~10x speedup.
         """

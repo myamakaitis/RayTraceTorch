@@ -1,2 +1,2 @@
 from .std import *
-from filter import Fuzzy
+from .filter import Fuzzy

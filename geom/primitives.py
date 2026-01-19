@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from .transform import RayTransform
 
+intersectEpsilon = 1e-6
+
 
 class Surface(nn.Module):
     """
@@ -26,7 +28,7 @@ class Surface(nn.Module):
 
         t_stack = torch.stack(t_list)
 
-        t_stack = t_stack.masked_fill(t_stack <=0, float('inf'))
+        t_stack = t_stack.masked_fill(t_stack <= intersectEpsilon, float('inf'))
 
         t_min, _ = torch.min(t_stack, dim=0)
 
