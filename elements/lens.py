@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from IPython.core.completer import MatcherAPIv1
 
 from geom import RayTransform
 from .parent import Element
@@ -10,12 +9,16 @@ from .ideal import ParaxialRefractMat
 
 class SingletLens(Element):
 
-    def __init__(self, c1, c2, d, t,
-                 ior_glass, ior_media = 1.0,
-                 c1_grad = False, c2_grad = False,
-                 t_grad = False, d_grad = False,
-                 ior_glass_grad = False, ior_media_grad = False,
-                 fresnel = False, inked=False, transform: RayTransform=None):
+    def __init__(self, c1: float, c2: float,
+                 d: float, t: float,
+                 ior_glass: float, ior_media: float = 1.0,
+
+                 c1_grad: bool = False, c2_grad: bool = False,
+                 t_grad: bool = False, d_grad: bool = False,
+                 ior_glass_grad: bool = False, ior_media_grad: bool = False,
+
+                 fresnel: bool = False, inked: bool =False,
+                 transform: RayTransform=None):
 
         super().__init__()
 
@@ -184,7 +187,7 @@ class CylSingletLens(SingletLens):
     def __init__(self, c1, c2, height, width, t,
                  ior_glass, ior_media = 1.0,
                  c1_grad = False, c2_grad = False,
-                 t_grad = False, h_grad = False, w_grad = False,
+                 t_grad = False, height_grad = False, width_grad = False,
                  ior_glass_grad = False, ior_media_grad = False,
                  fresnel = False, inked=False, transform: RayTransform=None):
 
@@ -197,7 +200,7 @@ class CylSingletLens(SingletLens):
 
         self.shape = CylSinglet(C1 = c1, C2 = c2, height=height, width=width, T=t,
                              C1_grad = c1_grad, C2_grad = c2_grad,
-                             h_grad=h_grad, w_grad=w_grad, T_grad=t_grad,
+                             h_grad=height_grad, w_grad=width_grad, T_grad=t_grad,
                              transform=transform)
 
         for _ in range(3):

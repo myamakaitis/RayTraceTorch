@@ -94,15 +94,5 @@ def test_fresnel():
     assert True
 
 
-if __name__ == "__main__":
-    torch.manual_seed(678967896)
-
-    test_reflect()
-
-    test_snell()
-
-    test_fresnel()
-
-
 
 

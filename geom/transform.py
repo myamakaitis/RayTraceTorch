@@ -10,8 +10,8 @@ class RayTransform(nn.Module):
 
     def __init__(self, rotation: Optional[Vector3] = None, translation: Optional[Vector3] = None,
                  dtype: torch.dtype =torch.float32,
-                 trans_grad: bool = False, trans_mask: bool = None,
-                 rot_grad: Bool3 = False, rot_mask: Bool3 = None):
+                 trans_grad: bool = False, trans_mask: Bool3 = None,
+                 rot_grad: bool = False, rot_mask: Bool3 = None):
         """
         Args:
             rotation: [3, 3] Rotation matrix (Local -> Global).

@@ -46,7 +46,7 @@ class Shape(nn.Module):
 
             # 3. Check Validity
             is_finite = t < float('inf')
-            is_in_bounds = self.inbounds(hit_point, surf)
+            is_in_bounds = self.inBounds(hit_point, i)
             valid_mask = is_finite & is_in_bounds
 
             t_final = torch.where(valid_mask, t, torch.full_like(t, float('inf')))

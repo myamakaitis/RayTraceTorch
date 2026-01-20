@@ -1,4 +1,4 @@
-from .transform import RayTransform
+from .transform import RayTransform, Vector3, Bool3
 from .primitives import Surface, Sphere, Quadric, Plane, QuadricZY
 from .bounded import SurfaceBounded, Rectangle, Disk, Ellipse
 from .shape import Shape, CvxPolyhedron, Box, Box4Side

@@ -6,7 +6,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from RayTraceTorch.elements import Sensor
 
-def sensor_spot_size():
+def test_sensor_spot_size():
 
     print("--- Starting Sensor Spot Size Test ---")
 
@@ -66,6 +66,3 @@ def sensor_spot_size():
         print(f"{i:<5} | {expected:<18.4f} | {calc:<15.4f} | {err:<10.4f}")
 
     print("-" * 75)
-
-if __name__ == "__main__":
-    sensor_spot_size()
