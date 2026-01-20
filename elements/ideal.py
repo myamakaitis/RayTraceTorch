@@ -3,10 +3,10 @@ import torch.nn as nn
 from typing import List, Union
 
 from .parent import Element
-from ..geom import Plane, Disk
+from ..geom import Plane, Disk, RayTransform
 from ..phys import Linear
 
-def ParaxialLensMat(lens_power_x, lens_power_y):
+def ParaxialLensMat(lens_power_x: torch.Tensor, lens_power_y: torch.Tensor) -> torch.Tensor:
 
     Mat = torch.eye(5, device=lens_power_x.device, dtype=lens_power_x.dtype)
     Mat = Mat.index_put((torch.tensor([1, 3]), torch.tensor([0, 2])),
@@ -14,7 +14,7 @@ def ParaxialLensMat(lens_power_x, lens_power_y):
 
     return Mat
 
-def ParaxialDistMat(dist):
+def ParaxialDistMat(dist: torch.Tensor) -> torch.Tensor:
 
     Mat = torch.eye(5, device=dist.device, dtype=dist.dtype)
     Mat = Mat.index_put((torch.tensor([0, 2]), torch.tensor([1, 3])),
@@ -22,7 +22,7 @@ def ParaxialDistMat(dist):
 
     return Mat
 
-def ParaxialRefractMat(Cx, Cy, ior_1, ior_2):
+def ParaxialRefractMat(Cx, Cy, ior_1, ior_2: torch.Tensor) -> torch.Tensor:
 
     vals = torch.stack([
         Cx * (ior_1 - ior_2) / ior_2,
@@ -43,8 +43,6 @@ class LinearElement(Element):
         super().__init__()
 
         self.shape = shape
-
-
         linSurfFunc.transform = shape.transform
 
         self.surface_functions.append(linSurfFunc)
@@ -58,7 +56,8 @@ class LinearElement(Element):
 
 class IdealThinLens(LinearElement):
 
-    def __init__(self, focal, focal_grad = False, diameter = float("inf"), transform = None):
+    def __init__(self, focal: float, focal_grad: bool = False,
+                 diameter: float = float("inf"), transform: RayTransform = None):
 
         if diameter == float("inf"):
             plane = Plane(transform=transform)
@@ -82,9 +81,9 @@ class IdealThinLens(LinearElement):
 
 class IdealCylThinLens(LinearElement):
 
-    def __init__(self, focal_x, focal_y,
-                 focal_x_grad = False, focal_y_grad =False,
-                 diameter = float("inf"), transform = None):
+    def __init__(self, focal_x: float, focal_y: float,
+                 focal_x_grad: bool = False, focal_y_grad: bool =False,
+                 diameter: float = float("inf"), transform: RayTransform = None):
 
         if diameter == float("inf"):
             plane = Plane(transform=transform)

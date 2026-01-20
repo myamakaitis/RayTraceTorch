@@ -33,11 +33,11 @@ class SurfaceFunction(nn.Module):
 class Linear(SurfaceFunction):
 
     def __init__(self,
-                Cx = 0, Cy = 0,
-                Dx = 1, Dy = 1,
+                Cx: float = 0, Cy: float = 0,
+                Dx: float = 1, Dy = 1,
                 Cx_grad = False, Cy_grad = False,
                 Dx_grad = False, Dy_grad = False,
-                transform=None):
+                transform: RayTransform =None):
 
         super().__init__()
         self.Cx = nn.Parameter(torch.as_tensor(Cx), requires_grad=Cx_grad)
