@@ -13,9 +13,72 @@ import typing
 from ..elements import *
 from ..geom import Vector3, Bool3
 from ..geom import RayTransform
+
+import sys
+import inspect
+import ast
+import torch
+import torch.nn as nn
+import typing
+from typing import Union, List, Tuple, Optional, Any
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QListWidget, QPushButton, QComboBox,
+                             QFormLayout, QDialog, QLineEdit, QDialogButtonBox,
+                             QLabel, QCheckBox, QGroupBox, QScrollArea, QMessageBox)
+
 # ==========================================
-# 2. INTROSPECTION LOGIC
+# 1. TYPE DEFINITIONS & ANALYZER
 # ==========================================
+
+
+def analyze_type(p_type):
+    """
+    Robustly determines the 'Intent' of a type hint.
+    Returns: 'BOOL', 'VEC3', 'BOOL3', 'DTYPE', 'CLASS', or 'PRIMITIVE'
+    """
+    # 1. Handle Torch Dtype explicitly
+    if p_type == torch.dtype:
+        return 'DTYPE'
+
+    # 2. Unwrap Optional/Union layers to find the "core" types
+    # This turns Optional[Vector3] into {Tensor, List[float], Tuple[float]}
+    origins = set()
+    args = set()
+
+    def unpack(t):
+        origin = typing.get_origin(t)
+        if origin is typing.Union:
+            for arg in typing.get_args(t):
+                unpack(arg)
+        elif t is not type(None):  # Ignore NoneType
+            origins.add(origin)
+            args.add(t)
+
+    unpack(p_type)
+
+    # 3. Match against known signatures
+
+    # Check for Vector3 (Looks for Tensor AND float lists)
+    # We check if torch.Tensor is one of the allowed types
+    if torch.Tensor in args:
+        # Distinguish Vector3 from Bool3 based on list contents if possible
+        # Vector3 usually implies List[float], Bool3 implies List[bool]
+        if List[bool] in args or Tuple[bool, ...] in args:
+            return 'BOOL3'
+        return 'VEC3'  # Default to Vec3 if Tensor is present
+
+    # Check for simple Bool (excluding the list variants)
+    if bool in args and len(args) == 1:
+        return 'BOOL'
+
+    # Check for Class (Recursion)
+    # If we have a custom class in the mix
+    for a in args:
+        if inspect.isclass(a) and a not in (int, float, str, bool, list, tuple, dict, torch.Tensor):
+            return 'CLASS'
+
+    return 'PRIMITIVE'
+
 
 def get_subclasses(cls):
     """Iterative subclass finder."""
@@ -30,19 +93,6 @@ def get_subclasses(cls):
                 queue.append(child)
     return subclasses
 
-def get_actual_class(p_type):
-    """Unwraps Optional[Class] or Union[Class, None] to return Class."""
-    if inspect.isclass(p_type):
-        return p_type
-
-    # Handle Unions/Optionals
-    origin = typing.get_origin(p_type)
-    if origin is typing.Union:
-        args = typing.get_args(p_type)
-        for arg in args:
-            if inspect.isclass(arg) and arg is not type(None):
-                return arg
-    return None
 
 def get_constructor_params(cls):
     """Safely extract __init__ signature."""
@@ -59,8 +109,19 @@ def get_constructor_params(cls):
     return params
 
 
+def get_actual_class(p_type):
+    """Helper to extract the class from Optional[Class]."""
+    if inspect.isclass(p_type): return p_type
+    origin = typing.get_origin(p_type)
+    if origin is typing.Union:
+        for arg in typing.get_args(p_type):
+            if inspect.isclass(arg) and arg is not type(None):
+                return arg
+    return None
+
+
 # ==========================================
-# 3. GUI IMPLEMENTATION
+# 2. CUSTOM WIDGETS
 # ==========================================
 
 class Vector3Input(QWidget):
@@ -70,7 +131,7 @@ class Vector3Input(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.inputs = []
 
-        # FIX: Ensure 'defaults' is always a list to prevent len() crash
+        # Safe default handling
         if isinstance(default, (list, tuple)):
             vals = default
         elif isinstance(default, torch.Tensor):
@@ -100,7 +161,6 @@ class Bool3Input(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.checks = []
 
-        # FIX: Ensure list to prevent crash
         if isinstance(default, (list, tuple)):
             vals = default
         elif isinstance(default, torch.Tensor):
@@ -110,8 +170,9 @@ class Bool3Input(QWidget):
         else:
             vals = [False, False, False]
 
+        labels = ["", "", ""]
         for i in range(3):
-            chk = QCheckBox()
+            chk = QCheckBox(labels[i])
             if i < len(vals) and vals[i]: chk.setChecked(True)
             layout.addWidget(chk)
             self.checks.append(chk)
@@ -120,34 +181,38 @@ class Bool3Input(QWidget):
         return [chk.isChecked() for chk in self.checks]
 
 
+# ==========================================
+# 3. MAIN DIALOG LOGIC
+# ==========================================
+
 class RecursiveElementDialog(QDialog):
     def __init__(self, parent=None, element_base_cls=None):
         super().__init__(parent)
         self.setWindowTitle("Add New Element")
-        self.resize(600, 750)
+        self.resize(650, 800)
 
-        self.main_layout = QVBoxLayout(self)
+        layout = QVBoxLayout(self)
 
-        # 1. Class Selector
+        # Class Selector
         self.class_selector = QComboBox()
         self.known_classes = {cls.__name__: cls for cls in get_subclasses(element_base_cls)}
         self.class_selector.addItems(list(self.known_classes.keys()))
         self.class_selector.currentTextChanged.connect(self.refresh_form)
 
-        self.main_layout.addWidget(QLabel("Select Element Type:"))
-        self.main_layout.addWidget(self.class_selector)
+        layout.addWidget(QLabel("Select Element Type:"))
+        layout.addWidget(self.class_selector)
 
-        # 2. Scroll Area
+        # Scroll Area
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.form_container = None
-        self.main_layout.addWidget(self.scroll)
+        layout.addWidget(self.scroll)
 
-        # 3. Buttons
+        # Buttons
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         btns.accepted.connect(self.validate_and_accept)
         btns.rejected.connect(self.reject)
-        self.main_layout.addWidget(btns)
+        layout.addWidget(btns)
 
         if self.known_classes:
             self.refresh_form(self.class_selector.currentText())
@@ -160,13 +225,12 @@ class RecursiveElementDialog(QDialog):
         self.scroll.setWidget(self.form_container)
         self.current_layout = QFormLayout(self.form_container)
 
-        cls = self.known_classes[class_name]
         try:
+            cls = self.known_classes[class_name]
             self.build_recursive_form(self.current_layout, cls, depth=0)
         except Exception as e:
-            # This catches bugs gracefully instead of crashing hard
-            self.current_layout.addRow(QLabel(f"Error building form: {e}"))
-            print(f"CRITICAL: {e}")
+            self.current_layout.addRow(QLabel(f"Error: {e}"))
+            print(f"Error: {e}")
 
     def build_recursive_form(self, parent_layout, cls, depth):
         if depth > 5:
@@ -178,110 +242,97 @@ class RecursiveElementDialog(QDialog):
         parent_layout.widgets = {}
         parent_layout.sub_forms = {}
 
-        # Identify "Gradient" pairs (e.g., 'c1' and 'c1_grad')
+        # Identify gradient pairs
         grad_keys = {k for k in params.keys() if k.endswith("_grad")}
 
         for name, (p_type, default) in params.items():
-            # SKIP if this is a _grad param (we handle it attached to the main param)
-            if name in grad_keys:
-                continue
+            if name in grad_keys: continue
 
-            type_str = str(p_type)
+            # --- 1. ANALYZE TYPE INTENT ---
+            intent = analyze_type(p_type)
+
             widget = None
-            w_type_tag = 'PRIMITIVE'
 
-            # --- 1. DETERMINE WIDGET TYPE ---
-
-            if p_type == bool:
+            # --- 2. CREATE WIDGET BASED ON INTENT ---
+            if intent == 'BOOL':
                 widget = QCheckBox()
                 if default is True: widget.setChecked(True)
-                w_type_tag = 'BOOL'
 
-            elif p_type == torch.dtype:
+            elif intent == 'DTYPE':
                 widget = QComboBox()
                 widget.addItems(["float32", "float64"])
                 if default == torch.float64: widget.setCurrentText("float64")
-                w_type_tag = 'DTYPE'
 
-            elif "Vector3" in type_str or p_type == Vector3:
+            elif intent == 'VEC3':
                 widget = Vector3Input(default)
-                w_type_tag = 'VEC3'
 
-            elif "Bool3" in type_str or p_type == Bool3:
+            elif intent == 'BOOL3':
                 widget = Bool3Input(default)
-                w_type_tag = 'BOOL3'
 
-            # --- 2. CHECK FOR RECURSION ---
-            else:
-                target_sub_class = get_actual_class(p_type)
-                # CRITICAL FIX: Add 'bool' to the exclusion list
-                if target_sub_class and target_sub_class not in (str, int, float, bool, list, tuple, dict,
-                                                                 torch.Tensor):
-
-                    group = QGroupBox(f"{name} ({target_sub_class.__name__})")
+            elif intent == 'CLASS':
+                # Handle Recursion
+                target_cls = get_actual_class(p_type)
+                if target_cls:
+                    group = QGroupBox(f"{name} ({target_cls.__name__})")
                     group_layout = QFormLayout()
                     group.setLayout(group_layout)
 
-                    # Handle Optional Groups (defaults to None)
                     if default is None:
                         group.setCheckable(True)
                         group.setChecked(False)
                         group.setTitle(f"{name} (Optional)")
 
-                    self.build_recursive_form(group_layout, target_sub_class, depth + 1)
+                    self.build_recursive_form(group_layout, target_cls, depth + 1)
                     parent_layout.addRow(group)
                     parent_layout.sub_forms[name] = (group_layout, group)
                     continue
 
-                # Default Primitive
+            # Default / Primitive fallback
+            if widget is None:
                 widget = QLineEdit()
                 if default is not None: widget.setText(str(default))
-                w_type_tag = 'PRIMITIVE'
+                intent = 'PRIMITIVE'  # Force tag for instantiation
 
-            # --- 3. ADD WIDGET TO LAYOUT (With optional Gradient Checkbox) ---
-
+            # --- 3. HANDLE GRADIENT CHECKBOX PAIRING ---
             grad_name = f"{name}_grad"
             if grad_name in grad_keys:
-                # Create Side-by-Side Layout
+                # We need a container to hold [MainWidget] + [GradCheckbox]
                 container = QWidget()
                 h_layout = QHBoxLayout(container)
                 h_layout.setContentsMargins(0, 0, 0, 0)
 
-                # Add Main Widget
-                h_layout.addWidget(widget)
+                h_layout.addWidget(widget)  # Add the main widget (e.g., Vector3Input)
 
-                # Add Gradient Checkbox
+                # Create the gradient checkbox
                 grad_chk = QCheckBox("Grad?")
-                # Check default for the grad param
-                grad_default = params[grad_name][1]
-                if grad_default is True: grad_chk.setChecked(True)
+                # Check default for the gradient param
+                g_default = params[grad_name][1]
+                if g_default is True: grad_chk.setChecked(True)
 
                 h_layout.addWidget(grad_chk)
 
                 parent_layout.addRow(name, container)
 
-                # Register BOTH widgets
-                parent_layout.widgets[name] = (widget, w_type_tag)
-                parent_layout.widgets[grad_name] = (grad_chk, 'BOOL')  # Treat as standard bool
+                # Register BOTH
+                parent_layout.widgets[name] = (widget, intent)
+                parent_layout.widgets[grad_name] = (grad_chk, 'BOOL')
             else:
-                # Standard Row
+                # Standard single row
                 parent_layout.addRow(name, widget)
-                parent_layout.widgets[name] = (widget, w_type_tag)
+                parent_layout.widgets[name] = (widget, intent)
 
     def instantiate_recursive(self, layout):
         kwargs = {}
-
-        # 1. Harvest Widgets
-        for name, (widget, w_type) in layout.widgets.items():
-            if w_type == 'BOOL':
+        for name, (widget, tag) in layout.widgets.items():
+            if tag == 'BOOL':
                 kwargs[name] = widget.isChecked()
-            elif w_type == 'DTYPE':
+            elif tag == 'DTYPE':
                 kwargs[name] = torch.float64 if widget.currentText() == "float64" else torch.float32
-            elif w_type == 'VEC3':
+            elif tag == 'VEC3':
                 kwargs[name] = widget.get_value()
-            elif w_type == 'BOOL3':
+            elif tag == 'BOOL3':
                 kwargs[name] = widget.get_value()
-            elif w_type == 'PRIMITIVE':
+            elif tag == 'PRIMITIVE':
                 val = widget.text()
                 try:
                     val = ast.literal_eval(val)
@@ -289,7 +340,6 @@ class RecursiveElementDialog(QDialog):
                     pass
                 kwargs[name] = val
 
-        # 2. Harvest Sub-Forms
         for name, (sub_layout, group_box) in layout.sub_forms.items():
             if group_box.isCheckable() and not group_box.isChecked():
                 kwargs[name] = None
@@ -307,7 +357,6 @@ class RecursiveElementDialog(QDialog):
 
     def get_instance(self):
         return self.new_instance
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -342,8 +391,3 @@ class MainWindow(QMainWindow):
             # If it has a transform, print that too
             if hasattr(new_obj, 'transform'):
                 print(f" -> Transform: {new_obj.transform.__dict__}")
-
-# ==========================================
-# 4. RUNNER
-# ==========================================
-
