@@ -69,9 +69,9 @@ class Singlet(Spheric):
     def __init__(self,
                  C1: float, C2: float,
                  D: float, T: float,
-                 C1_grad = True, C2_grad = True,
-                 D_grad = False, T_grad = True,
-                 transform=None):
+                 C1_grad: bool = True, C2_grad: bool = True,
+                 D_grad: bool = False, T_grad: bool = True,
+                 transform: RayTransform = None):
         """
         Args:
             C1 (Tensor): curvature of front surface (Inf for Plane).
@@ -122,10 +122,10 @@ class Doublet(Spheric):
                  C1: float, C2: float, C3: float,
                  D: float,
                  T1: float, T2: float,
-                 C1_grad=True, C2_grad=True, C3_grad=True,
-                 D_grad=False,
-                 T1_grad=True, T2_grad=True,
-                 transform=None):
+                 C1_grad: bool=True, C2_grad: bool=True, C3_grad: bool=True,
+                 D_grad: bool=False,
+                 T1_grad: bool=True, T2_grad: bool=True,
+                 transform: RayTransform=None):
         """
         Args:
             C1, C2, C3: Curvatures of the 3 surfaces (Front, Middle, Back).
@@ -215,10 +215,10 @@ class Triplet(Spheric):
                  C1: float, C2: float, C3: float, C4: float,
                  D: float,
                  T1: float, T2: float, T3: float,
-                 C1_grad=True, C2_grad=True, C3_grad=True, C4_grad=True,
-                 D_grad=False,
-                 T1_grad=True, T2_grad=True, T3_grad=True,
-                 transform=None):
+                 C1_grad: bool=True, C2_grad: bool=True, C3_grad: bool=True, C4_grad: bool=True,
+                 D_grad: bool=False,
+                 T1_grad: bool=True, T2_grad: bool=True, T3_grad: bool=True,
+                 transform: RayTransform=None):
         """
         Args:
             C1..C4: Curvatures of the 4 surfaces.

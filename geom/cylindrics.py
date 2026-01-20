@@ -61,9 +61,9 @@ class CylSinglet(Cylindric):
     def __init__(self,
                  C1: float, C2: float,
                  width: float, height: float, T: float,
-                 C1_grad=True, C2_grad=True,
-                 T_grad=True, w_grad=False, h_grad=False,
-                 transform=None):
+                 C1_grad: bool=True, C2_grad: bool=True,
+                 T_grad: bool=True, w_grad: bool=False, h_grad: bool=False,
+                 transform: RayTransform=None):
         """
         Args:
             C1, C2: Curvature in Y-direction.

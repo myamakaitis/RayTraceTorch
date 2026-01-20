@@ -8,7 +8,7 @@ class Shape(nn.Module):
     Base class for 3D volumetric shapes.
     Defines the volume 'inside' a set of boundaries.
     """
-    def __init__(self, transform = None):
+    def __init__(self, transform: RayTransform = None):
 
         super().__init__()
 
@@ -100,7 +100,7 @@ class Shape(nn.Module):
 
 class CvxPolyhedron(Shape):
 
-    def __init__(self, planes_list = None, transform=None):
+    def __init__(self, planes_list: list = None, transform: RayTransform = None):
 
         super().__init__(transform=transform)
 
@@ -134,8 +134,8 @@ class Box(CvxPolyhedron):
     A rectangular prism defined by 6 Plane surfaces.
     """
 
-    def __init__(self, length, width, height, transform=None,
-                 l_grad = False, w_grad = False, h_grad = False):
+    def __init__(self, length : float, width : float, height: float, transform: RayTransform=None,
+                 l_grad:bool = False, w_grad:bool = False, h_grad:bool = False):
 
         super().__init__(transform=transform)
 
@@ -212,8 +212,8 @@ class Box4Side(CvxPolyhedron):
     A rectangular prism defined by 6 Plane surfaces.
     """
 
-    def __init__(self, width, height, transform=None,
-                 w_grad = False, h_grad = False):
+    def __init__(self, width : float, height: float, transform: RayTransform=None,
+                 w_grad: bool = False, h_grad: bool = False):
 
         super().__init__(transform=transform)
 

@@ -1,11 +1,17 @@
 import torch
 import torch.nn as nn
 
+from typing import Optional, Union, List, Tuple
+
+Vector3 = Union[torch.Tensor, List[float], Tuple[float, ...]]
+Bool3 = Union[torch.Tensor, List[bool], Tuple[bool, ...]]
+
 class RayTransform(nn.Module):
 
-    def __init__(self, rotation=None, translation=None, dtype=torch.float32,
-                 trans_grad = False, trans_mask = None,
-                 rot_grad = False, rot_mask = None):
+    def __init__(self, rotation: Optional[Vector3] = None, translation: Optional[Vector3] = None,
+                 dtype: torch.dtype =torch.float32,
+                 trans_grad: bool = False, trans_mask: bool = None,
+                 rot_grad: Bool3 = False, rot_mask: Bool3 = None):
         """
         Args:
             rotation: [3, 3] Rotation matrix (Local -> Global).

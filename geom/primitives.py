@@ -13,7 +13,7 @@ class Surface(nn.Module):
     2. intersect: Detailed, differentiable, returns t, hit_point, and global_normal.
     """
 
-    def __init__(self, transform=None):
+    def __init__(self, transform : RayTransform = None):
 
         super().__init__()
 
@@ -145,7 +145,7 @@ class Sphere(Surface):
     though for a pure Sphere class, R is often more intuitive.
     Here we stick to Radius R as a parameter for explicit Spheres.
     """
-    def __init__(self, radius, radius_grad = False, transform=None):
+    def __init__(self, radius : float, radius_grad: bool = False, transform: RayTransform = None):
         super().__init__(transform=transform)
         self.radius = torch.nn.Parameter(torch.tensor(radius), requires_grad=radius_grad)
 
@@ -190,8 +190,8 @@ class Cylinder(Surface):
     Equation: x^2 + y^2 = R^2
     """
 
-    def __init__(self, radius, transform=None,
-                 radius_grad = False):
+    def __init__(self, radius : float, transform: RayTransform = None,
+                 radius_grad : bool = False):
         super().__init__(transform)
         self.radius = nn.Parameter(torch.tensor(radius), requires_grad=radius_grad)
 
@@ -255,13 +255,13 @@ class Quadric(Surface):
                    k=0 (Sphere), k=-1 (Parabola), k<-1 (Hyperbola).
     """
 
-    def __init__(self, c, k, transform=None,
-                 c_grad = False, k_grad = False):
+    def __init__(self, c:float, k:float, transform: RayTransform = None,
+                 c_grad: bool = False, k_grad: bool = False):
 
         super().__init__(transform = transform)
 
-        self.c = nn.Parameter(torch.tensor(c), requires_grad=c_grad)
-        self.k = nn.Parameter(torch.tensor(k), requires_grad=k_grad)
+        self.c = nn.Parameter(torch.as_tensor(c), requires_grad=c_grad)
+        self.k = nn.Parameter(torch.as_tensor(k), requires_grad=k_grad)
 
     def _get_coeffs(self, local_pos, local_dir):
         """
