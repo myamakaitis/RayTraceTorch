@@ -232,6 +232,27 @@ class RecursiveElementDialog(QDialog):
             self.current_layout.addRow(QLabel(f"Error: {e}"))
             print(f"Error: {e}")
 
+    def find_gradient_partner(self, name, all_params):
+        """
+        Smart-matches a parameter to its gradient flag.
+        Handles: c1 -> c1_grad, translation -> trans_grad, rotation -> rot_grad
+        """
+        # 1. Direct Match (c1 -> c1_grad)
+        candidate = f"{name}_grad"
+        if candidate in all_params: return candidate
+
+        # 2. Abbreviation Match (translation -> trans_grad)
+        # Add your specific mappings here
+        abbrevs = {
+            'translation': 'trans_grad',
+            'rotation': 'rot_grad',
+            'ior_glass': 'ior_glass_grad',  # Example
+        }
+        if name in abbrevs and abbrevs[name] in all_params:
+            return abbrevs[name]
+
+        return None
+
     def build_recursive_form(self, parent_layout, cls, depth):
         if depth > 5:
             parent_layout.addRow(QLabel("Max recursion depth"))
@@ -242,35 +263,31 @@ class RecursiveElementDialog(QDialog):
         parent_layout.widgets = {}
         parent_layout.sub_forms = {}
 
-        # Identify gradient pairs
-        grad_keys = {k for k in params.keys() if k.endswith("_grad")}
+        # Track which parameters have been rendered so we don't duplicate or hide them
+        consumed_params = set()
 
         for name, (p_type, default) in params.items():
-            if name in grad_keys: continue
+            if name in consumed_params: continue
 
-            # --- 1. ANALYZE TYPE INTENT ---
+            # --- 1. IDENTIFY IF THIS HAS A GRADIENT PARTNER ---
+            grad_partner = self.find_gradient_partner(name, params)
+
+            # --- 2. ANALYZE TYPE ---
             intent = analyze_type(p_type)
-
             widget = None
 
-            # --- 2. CREATE WIDGET BASED ON INTENT ---
             if intent == 'BOOL':
                 widget = QCheckBox()
                 if default is True: widget.setChecked(True)
-
             elif intent == 'DTYPE':
                 widget = QComboBox()
                 widget.addItems(["float32", "float64"])
                 if default == torch.float64: widget.setCurrentText("float64")
-
             elif intent == 'VEC3':
                 widget = Vector3Input(default)
-
             elif intent == 'BOOL3':
                 widget = Bool3Input(default)
-
             elif intent == 'CLASS':
-                # Handle Recursion
                 target_cls = get_actual_class(p_type)
                 if target_cls:
                     group = QGroupBox(f"{name} ({target_cls.__name__})")
@@ -285,41 +302,144 @@ class RecursiveElementDialog(QDialog):
                     self.build_recursive_form(group_layout, target_cls, depth + 1)
                     parent_layout.addRow(group)
                     parent_layout.sub_forms[name] = (group_layout, group)
+
+                    consumed_params.add(name)
                     continue
 
-            # Default / Primitive fallback
+            # Fallback
             if widget is None:
                 widget = QLineEdit()
                 if default is not None: widget.setText(str(default))
-                intent = 'PRIMITIVE'  # Force tag for instantiation
+                intent = 'PRIMITIVE'
 
-            # --- 3. HANDLE GRADIENT CHECKBOX PAIRING ---
-            grad_name = f"{name}_grad"
-            if grad_name in grad_keys:
-                # We need a container to hold [MainWidget] + [GradCheckbox]
+            # --- 3. RENDER (With or Without Partner) ---
+
+            if grad_partner and grad_partner not in consumed_params:
+                # --- CASE A: PAIR IT UP ---
                 container = QWidget()
-                h_layout = QHBoxLayout(container)
-                h_layout.setContentsMargins(0, 0, 0, 0)
+                h = QHBoxLayout(container)
+                h.setContentsMargins(0, 0, 0, 0)
+                h.addWidget(widget)
 
-                h_layout.addWidget(widget)  # Add the main widget (e.g., Vector3Input)
-
-                # Create the gradient checkbox
+                # Create the checkbox
                 grad_chk = QCheckBox("Grad?")
-                # Check default for the gradient param
-                g_default = params[grad_name][1]
-                if g_default is True: grad_chk.setChecked(True)
+                g_default = params[grad_partner][1]
 
-                h_layout.addWidget(grad_chk)
+                # Robust default checking (handles Bool3 vs bool)
+                is_checked = False
+                if isinstance(g_default, bool) and g_default is True:
+                    is_checked = True
+                elif isinstance(g_default, (list, tuple)) and any(g_default):
+                    is_checked = True
+                grad_chk.setChecked(is_checked)
+
+                h.addWidget(grad_chk)
 
                 parent_layout.addRow(name, container)
 
                 # Register BOTH
                 parent_layout.widgets[name] = (widget, intent)
-                parent_layout.widgets[grad_name] = (grad_chk, 'BOOL')
+                parent_layout.widgets[grad_partner] = (grad_chk, 'BOOL')  # Treat grad flag as simple bool
+
+                consumed_params.add(name)
+                consumed_params.add(grad_partner)
+
             else:
-                # Standard single row
+                # --- CASE B: SOLO RENDER ---
+                # This catches 'trans_grad' if it appears on its own loop iteration
+                # or if 'translation' had no partner.
                 parent_layout.addRow(name, widget)
                 parent_layout.widgets[name] = (widget, intent)
+                consumed_params.add(name)
+
+    # def build_recursive_form(self, parent_layout, cls, depth):
+    #     if depth > 5:
+    #         parent_layout.addRow(QLabel("Max recursion depth"))
+    #         return
+    #
+    #     params = get_constructor_params(cls)
+    #     parent_layout.target_class = cls
+    #     parent_layout.widgets = {}
+    #     parent_layout.sub_forms = {}
+    #
+    #     # Identify gradient pairs
+    #     grad_keys = {k for k in params.keys() if k.endswith("_grad")}
+    #
+    #     for name, (p_type, default) in params.items():
+    #         if name in grad_keys: continue
+    #
+    #         # --- 1. ANALYZE TYPE INTENT ---
+    #         intent = analyze_type(p_type)
+    #
+    #         widget = None
+    #
+    #         # --- 2. CREATE WIDGET BASED ON INTENT ---
+    #         if intent == 'BOOL':
+    #             widget = QCheckBox()
+    #             if default is True: widget.setChecked(True)
+    #
+    #         elif intent == 'DTYPE':
+    #             widget = QComboBox()
+    #             widget.addItems(["float32", "float64"])
+    #             if default == torch.float64: widget.setCurrentText("float64")
+    #
+    #         elif intent == 'VEC3':
+    #             widget = Vector3Input(default)
+    #
+    #         elif intent == 'BOOL3':
+    #             widget = Bool3Input(default)
+    #
+    #         elif intent == 'CLASS':
+    #             # Handle Recursion
+    #             target_cls = get_actual_class(p_type)
+    #             if target_cls:
+    #                 group = QGroupBox(f"{name} ({target_cls.__name__})")
+    #                 group_layout = QFormLayout()
+    #                 group.setLayout(group_layout)
+    #
+    #                 if default is None:
+    #                     group.setCheckable(True)
+    #                     group.setChecked(False)
+    #                     group.setTitle(f"{name} (Optional)")
+    #
+    #                 self.build_recursive_form(group_layout, target_cls, depth + 1)
+    #                 parent_layout.addRow(group)
+    #                 parent_layout.sub_forms[name] = (group_layout, group)
+    #                 continue
+    #
+    #         # Default / Primitive fallback
+    #         if widget is None:
+    #             widget = QLineEdit()
+    #             if default is not None: widget.setText(str(default))
+    #             intent = 'PRIMITIVE'  # Force tag for instantiation
+    #
+    #         # --- 3. HANDLE GRADIENT CHECKBOX PAIRING ---
+    #         grad_name = f"{name}_grad"
+    #         if grad_name in grad_keys:
+    #             # We need a container to hold [MainWidget] + [GradCheckbox]
+    #             container = QWidget()
+    #             h_layout = QHBoxLayout(container)
+    #             h_layout.setContentsMargins(0, 0, 0, 0)
+    #
+    #             h_layout.addWidget(widget)  # Add the main widget (e.g., Vector3Input)
+    #
+    #             # Create the gradient checkbox
+    #             grad_chk = QCheckBox("Grad?")
+    #             # Check default for the gradient param
+    #             g_default = params[grad_name][1]
+    #             if g_default is True: grad_chk.setChecked(True)
+    #
+    #             h_layout.addWidget(grad_chk)
+    #
+    #             parent_layout.addRow(name, container)
+    #
+    #             # Register BOTH
+    #             parent_layout.widgets[name] = (widget, intent)
+    #             parent_layout.widgets[grad_name] = (grad_chk, 'BOOL')
+    #         else:
+    #             # Standard single row
+    #             parent_layout.addRow(name, widget)
+    #             parent_layout.widgets[name] = (widget, intent)
 
     def instantiate_recursive(self, layout):
         kwargs = {}
