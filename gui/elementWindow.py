@@ -11,8 +11,7 @@ import typing
 
 
 from ..elements import *
-from ..geom import Vector3, Bool3
-from ..geom import RayTransform
+from ..geom import *
 
 import sys
 import inspect
@@ -181,6 +180,87 @@ class Bool3Input(QWidget):
         return [chk.isChecked() for chk in self.checks]
 
 
+class PolymorphicElementWidget(QWidget):
+    def __init__(self, name, base_roots, dialog_ref, depth, default=None):
+        super().__init__()
+        self.dialog = dialog_ref
+        self.depth = depth
+        self.is_optional = (default is None)
+
+        # [MODIFICATION] Normalize base_roots to a list to handle single or multiple parents
+        if not isinstance(base_roots, list):
+            self.base_roots = [base_roots]
+        else:
+            self.base_roots = base_roots
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+
+        # --- 1. Master Checkbox ---
+        self.enable_chk = None
+        if self.is_optional:
+            self.enable_chk = QCheckBox(f"Enable {name}?")
+            self.enable_chk.setChecked(False)
+            self.enable_chk.toggled.connect(self.toggle_content)
+            self.layout.addWidget(self.enable_chk)
+
+        # --- 2. Content Container ---
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.addWidget(self.content_widget)
+
+        # --- 3. Class Selector (Aggregated) ---
+        self.selector = QComboBox()
+
+        # [MODIFICATION] Aggregate subclasses from ALL provided roots
+        self.subclasses = {}
+        for root in self.base_roots:
+            for cls in get_subclasses(root):
+                self.subclasses[cls.__name__] = cls
+
+        # Sort keys for cleaner UI
+        sorted_names = sorted(list(self.subclasses.keys()))
+        self.selector.addItems(sorted_names)
+        self.selector.currentTextChanged.connect(self.refresh_subform)
+        self.content_layout.addWidget(self.selector)
+
+        # --- 4. Sub-Form Container ---
+        # We use the name of the first root for the label to keep it generic
+        label_name = self.base_roots[0].__name__ if self.base_roots else "Object"
+        self.form_container = QGroupBox(f"{label_name} Parameters")
+        self.form_layout = QFormLayout(self.form_container)
+        self.form_container.setLayout(self.form_layout)
+        self.content_layout.addWidget(self.form_container)
+
+        # Initialize State
+        if self.subclasses:
+            self.refresh_subform(self.selector.currentText())
+
+        if self.is_optional:
+            self.toggle_content(False)
+
+    def toggle_content(self, checked):
+        self.content_widget.setVisible(checked)
+
+    def refresh_subform(self, class_name):
+        if not class_name: return
+
+        while self.form_layout.count():
+            item = self.form_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+
+        cls = self.subclasses[class_name]
+        self.form_layout.target_class = cls
+        self.form_layout.widgets = {}
+        self.form_layout.sub_forms = {}
+
+        self.dialog.build_recursive_form(self.form_layout, cls, self.depth + 1)
+
+    def get_instance(self):
+        if self.is_optional and not self.enable_chk.isChecked():
+            return None
+        return self.dialog.instantiate_recursive(self.form_layout)
 # ==========================================
 # 3. MAIN DIALOG LOGIC
 # ==========================================
@@ -288,8 +368,26 @@ class RecursiveElementDialog(QDialog):
             elif intent == 'BOOL3':
                 widget = Bool3Input(default)
             elif intent == 'CLASS':
+
                 target_cls = get_actual_class(p_type)
+
                 if target_cls:
+
+                    is_polymorphic = target_cls.__name__ in ['Shape', 'Surface']
+
+                    if is_polymorphic:
+                        # Pass 'default' so the widget knows if it should be optional
+                        search_roots = [target_cls]
+
+                        if target_cls.__name__ == 'Shape':
+                            search_roots = [Shape, Surface]
+
+                        poly_widget = PolymorphicElementWidget(name, search_roots, self, depth, default)
+                        parent_layout.addRow(name, poly_widget)
+                        parent_layout.widgets[name] = (poly_widget, 'POLY_CLASS')
+                        consumed_params.add(name)
+                        continue
+
                     group = QGroupBox(f"{name} ({target_cls.__name__})")
                     group_layout = QFormLayout()
                     group.setLayout(group_layout)
@@ -352,95 +450,6 @@ class RecursiveElementDialog(QDialog):
                 parent_layout.widgets[name] = (widget, intent)
                 consumed_params.add(name)
 
-    # def build_recursive_form(self, parent_layout, cls, depth):
-    #     if depth > 5:
-    #         parent_layout.addRow(QLabel("Max recursion depth"))
-    #         return
-    #
-    #     params = get_constructor_params(cls)
-    #     parent_layout.target_class = cls
-    #     parent_layout.widgets = {}
-    #     parent_layout.sub_forms = {}
-    #
-    #     # Identify gradient pairs
-    #     grad_keys = {k for k in params.keys() if k.endswith("_grad")}
-    #
-    #     for name, (p_type, default) in params.items():
-    #         if name in grad_keys: continue
-    #
-    #         # --- 1. ANALYZE TYPE INTENT ---
-    #         intent = analyze_type(p_type)
-    #
-    #         widget = None
-    #
-    #         # --- 2. CREATE WIDGET BASED ON INTENT ---
-    #         if intent == 'BOOL':
-    #             widget = QCheckBox()
-    #             if default is True: widget.setChecked(True)
-    #
-    #         elif intent == 'DTYPE':
-    #             widget = QComboBox()
-    #             widget.addItems(["float32", "float64"])
-    #             if default == torch.float64: widget.setCurrentText("float64")
-    #
-    #         elif intent == 'VEC3':
-    #             widget = Vector3Input(default)
-    #
-    #         elif intent == 'BOOL3':
-    #             widget = Bool3Input(default)
-    #
-    #         elif intent == 'CLASS':
-    #             # Handle Recursion
-    #             target_cls = get_actual_class(p_type)
-    #             if target_cls:
-    #                 group = QGroupBox(f"{name} ({target_cls.__name__})")
-    #                 group_layout = QFormLayout()
-    #                 group.setLayout(group_layout)
-    #
-    #                 if default is None:
-    #                     group.setCheckable(True)
-    #                     group.setChecked(False)
-    #                     group.setTitle(f"{name} (Optional)")
-    #
-    #                 self.build_recursive_form(group_layout, target_cls, depth + 1)
-    #                 parent_layout.addRow(group)
-    #                 parent_layout.sub_forms[name] = (group_layout, group)
-    #                 continue
-    #
-    #         # Default / Primitive fallback
-    #         if widget is None:
-    #             widget = QLineEdit()
-    #             if default is not None: widget.setText(str(default))
-    #             intent = 'PRIMITIVE'  # Force tag for instantiation
-    #
-    #         # --- 3. HANDLE GRADIENT CHECKBOX PAIRING ---
-    #         grad_name = f"{name}_grad"
-    #         if grad_name in grad_keys:
-    #             # We need a container to hold [MainWidget] + [GradCheckbox]
-    #             container = QWidget()
-    #             h_layout = QHBoxLayout(container)
-    #             h_layout.setContentsMargins(0, 0, 0, 0)
-    #
-    #             h_layout.addWidget(widget)  # Add the main widget (e.g., Vector3Input)
-    #
-    #             # Create the gradient checkbox
-    #             grad_chk = QCheckBox("Grad?")
-    #             # Check default for the gradient param
-    #             g_default = params[grad_name][1]
-    #             if g_default is True: grad_chk.setChecked(True)
-    #
-    #             h_layout.addWidget(grad_chk)
-    #
-    #             parent_layout.addRow(name, container)
-    #
-    #             # Register BOTH
-    #             parent_layout.widgets[name] = (widget, intent)
-    #             parent_layout.widgets[grad_name] = (grad_chk, 'BOOL')
-    #         else:
-    #             # Standard single row
-    #             parent_layout.addRow(name, widget)
-    #             parent_layout.widgets[name] = (widget, intent)
-
     def instantiate_recursive(self, layout):
         kwargs = {}
         for name, (widget, tag) in layout.widgets.items():
@@ -452,6 +461,9 @@ class RecursiveElementDialog(QDialog):
                 kwargs[name] = widget.get_value()
             elif tag == 'BOOL3':
                 kwargs[name] = widget.get_value()
+            if tag == 'POLY_CLASS':
+                # The widget handles whether to return an object or None
+                kwargs[name] = widget.get_instance()
             elif tag == 'PRIMITIVE':
                 val = widget.text()
                 try:
