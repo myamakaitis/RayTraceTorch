@@ -33,8 +33,8 @@ class Camera:
         # Note: We look down -Z in standard convention, but implementation varies.
         # Here we align: Forward = normalize(target - origin)
         self.forward = F.normalize(target - self.origin, dim=0)
-        self.right = F.normalize(torch.cross(self.forward, up), dim=0)
-        self.up_cam = torch.cross(self.right, self.forward)
+        self.right = F.normalize(torch.linalg.cross(self.forward, up), dim=0)
+        self.up_cam = torch.linalg.cross(self.right, self.forward)
 
     def generate_rays(self):
         """
@@ -209,7 +209,7 @@ class Renderer:
             # If not, default to 1.5
             n_val1 = getattr(phys_func, 'ior_in', 1.5)
             n_val2 = getattr(phys_func, 'ior_out', 1.5)
-            
+
             n_val = torch.max(n_val1, n_val2)
 
             # If n_val is a tensor, we might need logic, but usually it's scalar per surface

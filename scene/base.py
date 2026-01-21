@@ -11,7 +11,7 @@ class Scene(nn.Module):
         self.rays = None
         self.Nbounces = 100
 
-        self._build_index_maps()
+        # self._build_index_maps()
 
     def _build_index_maps(self):
         """

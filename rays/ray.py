@@ -51,6 +51,8 @@ class Rays:
         # Optical properties
         if wavelengths is not None:
             self.wavelength = torch.as_tensor(wavelengths, dtype=dtype, device=device)
+        else:
+            self.wavelength = None
 
         if intensities is not None:
             self.intensity = torch.as_tensor(intensities, dtype=dtype, device=device)

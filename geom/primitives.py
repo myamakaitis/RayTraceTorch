@@ -53,7 +53,7 @@ class Surface(nn.Module):
 
         t = self._check_t(t_list, local_pos, local_dir)
 
-        return t
+        return t.unsqueeze(1)
 
     def forward(self, rays, *args):
         """

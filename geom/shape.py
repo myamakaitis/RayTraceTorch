@@ -42,18 +42,19 @@ class Shape(nn.Module):
             t = surf.intersectTest(local_rays)
 
             # 2. Hit Points
-            hit_point = local_pos + t.unsqueeze(1) * local_dir
+            hit_point = local_pos + t * local_dir
 
             # 3. Check Validity
+            t = t.squeeze()
             is_finite = t < float('inf')
             is_in_bounds = self.inBounds(hit_point, i)
             valid_mask = is_finite & is_in_bounds
 
-            t_final = torch.where(valid_mask, t, torch.full_like(t, float('inf')))
+            t_final = torch.where(valid_mask, t, torch.full_like(t, float('inf'))).unsqueeze(1)
             t_list.append(t_final)
 
         # Stack into a matrix [N, Number_of_Surfaces]
-        return torch.stack(t_list, dim=1)
+        return torch.cat(t_list, dim=1)
 
     def forward(self, rays, surf_idx):
         """

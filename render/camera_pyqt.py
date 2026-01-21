@@ -1,92 +1,61 @@
+from .camera import Renderer, Camera
+
+
+# Note: Ensure these imports match your folder structure
+# from ..rays.ray import Rays
+
 import sys
 import torch
 import torch.nn.functional as F
 import numpy as np
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QHBoxLayout,
-                             QVBoxLayout, QLabel, QSplitter)
-from PyQt6.QtCore import Qt, QTimer, QPoint
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor
 
-# Imports from your codebase structure
-# Ensure your PYTHONPATH is set or these files are in the package
-from .camera import Renderer, Camera
-from ..rays.ray import Rays
+# PyQt6 Imports
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QSplitter)
+from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor
 
 
 class InteractiveCamera(Camera):
-    """
-    Extends the static Camera with mutation methods for navigation.
-    """
+    """Extends Camera with navigation logic."""
 
     def rotate_yaw_pitch(self, d_yaw, d_pitch):
-        """
-        Rotates the camera direction based on mouse drag.
-        """
-
-        # 1. Pitch (Rotate around Right vector)
-        # Create rotation matrix for Pitch
-        # Axis-angle rotation formula or simple quaternion could be used.
-        # Here we use Rodrigues' rotation formula logic simplified for vectors.
-
-        # Rotations using PyTorch for consistency
         def rotate_vector(vec, axis, angle):
             cos_a = torch.cos(angle)
             sin_a = torch.sin(angle)
             return vec * cos_a + torch.cross(axis, vec) * sin_a + axis * torch.dot(axis, vec) * (1 - cos_a)
 
-        # Apply Pitch
         self.forward = rotate_vector(self.forward, self.right, d_pitch)
         self.up_cam = rotate_vector(self.up_cam, self.right, d_pitch)
 
-        # Apply Yaw (Rotate around World Up, usually (0,1,0), or Local Up?)
-        # Standard FPS controls use World Up for Yaw to prevent rolling.
-        # Flight controls use Local Up. Let's use Local Up for orbital feel
-        # or World Up (0,1,0) for stable horizon.
-        # Using Camera Up (Local) allows full 6DOF rotation (like holding an object).
         self.forward = rotate_vector(self.forward, self.up_cam, d_yaw)
         self.right = rotate_vector(self.right, self.up_cam, d_yaw)
 
-        # Re-normalize and orthogonalize to prevent drift
         self.forward = F.normalize(self.forward, dim=0)
         self.right = F.normalize(torch.cross(self.forward, self.up_cam), dim=0)
         self.up_cam = torch.cross(self.right, self.forward)
 
     def roll(self, angle):
-        """Rotates around the Forward axis."""
         c = torch.cos(angle)
         s = torch.sin(angle)
-
-        # Standard 2D rotation in the Right-Up plane
         new_right = c * self.right - s * self.up_cam
         new_up = s * self.right + c * self.up_cam
-
         self.right = new_right
         self.up_cam = new_up
 
     def move_local(self, dx, dy, dz):
-        """
-        Moves the camera origin relative to its orientation.
-        dx: Right, dy: Up, dz: Forward
-        """
         move_vec = (self.right * dx) + (self.up_cam * dy) + (self.forward * dz)
         self.origin += move_vec
 
 
 class RenderWidget(QLabel):
-    """
-    The 3D Viewport. Intercepts mouse events to control the camera.
-    """
-
     def __init__(self, renderer, camera, parent=None):
         super().__init__(parent)
         self.renderer = renderer
         self.camera = camera
         self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.last_pos = QPoint(0, 0)
-
-        # Settings
         self.mouse_sensitivity = 0.005
         self.move_speed = 0.5
 
@@ -94,39 +63,51 @@ class RenderWidget(QLabel):
         self.refresh_render()
 
     def refresh_render(self):
-        """Calls the renderer and updates the widget image."""
-        # Get tensor image: [H, W, 3] (0.0 - 1.0)
-        img_tensor = self.renderer.render_3d(self.camera)
+        try:
+            img_tensor = self.renderer.render_3d(self.camera).cpu()
+            h, w, c = img_tensor.shape
 
-        # Convert to uint8 numpy for QImage
-        img_np = (img_tensor.numpy() * 255).astype(np.uint8)
-        h, w, c = img_np.shape
+            # 2. Force RGBA (4 channels)
+            if c == 3:
+                alpha = torch.ones((h, w, 1), dtype=img_tensor.dtype)
+                img_tensor = torch.cat((img_tensor, alpha), dim=2)
 
-        # Create QImage
-        q_img = QImage(img_np.data, w, h, 3 * w, QImage.Format_RGB888)
-        self.setPixmap(QPixmap.fromImage(q_img))
+            # 3. Convert to Bytes (The "Nuclear Option" for stability)
+            # We create a distinct bytes object. QImage copies this internally
+            # when using loadFromData, OR we pass it to constructor.
+            # Using tobytes() creates a copy, ensuring no shared memory stride issues.
+            img_data = (torch.clamp(img_tensor, 0, 1) * 255).byte().numpy().tobytes()
+
+            # 4. Create QImage
+            q_img = QImage(
+                img_data,
+                w,
+                h,
+                w * 4,
+                QImage.Format.Format_RGBA8888
+            )
+
+            # 5. Set Pixmap (Deep Copy)
+            self.setPixmap(QPixmap.fromImage(q_img.copy()))
+
+        except Exception as e:
+            print(f"Render Error: {e}")
 
     def mousePressEvent(self, event):
-        self.last_pos = event.pos()
+        self.last_pos = event.position().toPoint()
 
     def mouseMoveEvent(self, event):
-        dx = event.x() - self.last_pos.x()
-        dy = event.y() - self.last_pos.y()
-        self.last_pos = event.pos()
+        pos = event.position().toPoint()
+        dx = pos.x() - self.last_pos.x()
+        dy = pos.y() - self.last_pos.y()
+        self.last_pos = pos
 
-        # Input Handling Logic
-
-        # 1. Alt + Drag (Left or Right) -> Roll
-        if event.modifiers() & Qt.AltModifier:
-            # Roll based on horizontal drag
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
             self.camera.roll(torch.tensor(dx * self.mouse_sensitivity))
             self.refresh_render()
             return
 
-        # 2. Middle Mouse (Button 3) -> Pan/Truck (XY Translation)
-        if event.buttons() & Qt.MiddleButton:
-            # -dx moves right (so we subtract to drag scene), +dy moves down (subtract to drag up)
-            # Actually, dragging scene means moving camera opposite.
+        if event.buttons() & Qt.MouseButton.MiddleButton:
             self.camera.move_local(
                 torch.tensor(-dx * self.move_speed * 0.1),
                 torch.tensor(dy * self.move_speed * 0.1),
@@ -135,9 +116,7 @@ class RenderWidget(QLabel):
             self.refresh_render()
             return
 
-        # 3. Standard Left Drag -> Look (Yaw/Pitch)
-        if event.buttons() & Qt.LeftButton:
-            # Invert dy for natural "head" movement (push up to look up)
+        if event.buttons() & Qt.MouseButton.LeftButton:
             self.camera.rotate_yaw_pitch(
                 torch.tensor(-dx * self.mouse_sensitivity),
                 torch.tensor(-dy * self.mouse_sensitivity)
@@ -145,23 +124,12 @@ class RenderWidget(QLabel):
             self.refresh_render()
 
     def wheelEvent(self, event):
-        """Scroll to Dolly (Move Z)."""
-        # angleDelta().y() is usually +/- 120
         delta = event.angleDelta().y() / 120.0
-        self.camera.move_local(
-            torch.tensor(0.0),
-            torch.tensor(0.0),
-            torch.tensor(delta * self.move_speed * 5.0)
-        )
+        self.camera.move_local(torch.tensor(0.0), torch.tensor(0.0), torch.tensor(delta * self.move_speed * 5.0))
         self.refresh_render()
 
 
 class ProfileWidget(QWidget):
-    """
-    Displays the 2D cross-section using Matplotlib backend or simple QPainter.
-    For speed/simplicity here, we use QPainter to draw the points directly.
-    """
-
     def __init__(self, renderer, scene):
         super().__init__()
         self.renderer = renderer
@@ -171,80 +139,88 @@ class ProfileWidget(QWidget):
         self.setStyleSheet("background-color: #222;")
 
     def update_data(self):
-        """Re-scans the scene."""
         self.profiles = []
-        # Scan all elements
-        for el in self.scene.elements:
-            # Heuristic scan width
-            scan_data = self.renderer.scan_profile(el, axis='x', num_points=200)
-            self.profiles.extend(scan_data)
-        self.update()  # Trigger paintEvent
+        # Wrap in try-except to prevent startup crashes if physics fails
+        try:
+            for el in self.scene.elements:
+                if hasattr(self.renderer, 'scan_profile'):
+                    scan_data = self.renderer.scan_profile(el, axis='x', num_points=200)
+                    self.profiles.extend(scan_data)
+            self.update()
+        except Exception as e:
+            print(f"Profile Scan Error: {e}")
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         w, h = self.width(), self.height()
-
-        # Coordinate System:
-        # Center of widget is (0,0) in world space.
-        # Scale: 10 pixels per mm?
-        scale = 10.0
         cx, cy = w // 2, h // 2
+        scale = 10.0
 
-        # Draw Axis
         painter.setPen(QColor(50, 50, 50))
-        painter.drawLine(0, cy, w, cy)  # Z axis (horizontal)
-        painter.drawLine(cx, 0, cx, h)  # Y/X axis (vertical)
+        painter.drawLine(0, cy, w, cy)
+        painter.drawLine(cx, 0, cx, h)
 
-        # Draw Points
         for surf in self.profiles:
-            # Color by surface index to distinguish
-            hue = (surf['surf_idx'] * 50) % 255
+            # Safe Color Generation
+            hue = int((surf['surf_idx'] * 50) % 255)
             painter.setPen(QColor.fromHsv(hue, 200, 255))
 
             h_vals = surf['h']
             z_vals = surf['z']
 
-            # Draw individual points
             for i in range(len(h_vals)):
-                # Map World (z, h) -> Screen (x, y)
-                # World Z is horizontal, World H is vertical
-                sx = cx + int(z_vals[i] * scale)
-                sy = cy - int(h_vals[i] * scale)  # Invert Y for screen coords
+                # Coordinate Clamping to prevent drawing at Infinity (Crash Risk)
+                try:
+                    raw_x = z_vals[i]
+                    raw_y = h_vals[i]
 
-                painter.drawPoint(sx, sy)
+                    # Skip NaNs or Infs
+                    if not (np.isfinite(raw_x) and np.isfinite(raw_y)):
+                        continue
+
+                    sx = int(cx + raw_x * scale)
+                    sy = int(cy - raw_y * scale)
+
+                    # Draw only if within reasonable bounds (Qt crashes on extreme coords)
+                    if -5000 < sx < 5000 and -5000 < sy < 5000:
+                        painter.drawPoint(sx, sy)
+                except ValueError:
+                    continue
 
 
 class CamWindow(QMainWindow):
     def __init__(self, scene):
         super().__init__()
-        self.setWindowTitle("Differentiable Ray Tracer")
+        self.setWindowTitle("Differentiable Ray Tracer (PyQt6)")
         self.resize(1200, 800)
 
-        # Initialize Logic
-        # Position camera back 50 units
+        device = next(model.parameters()).device
+
         self.cam = InteractiveCamera(
             position=(0, 0, -50), look_at=(0, 0, 0), up_vector=(0, 1, 0),
-            fov_deg=40, width=800, height=800, device='cuda' if torch.cuda.is_available() else 'cpu'
+            fov_deg=40, width=512, height=512,
+            device=device
         )
+
+        # Renderer with visibility
         self.renderer = Renderer(scene, background_color=(0.1, 0.1, 0.15))
 
-        # Widgets
         self.render_widget = RenderWidget(self.renderer, self.cam)
         self.profile_widget = ProfileWidget(self.renderer, scene)
-        self.profile_widget.update_data()  # Initial scan
 
-        # Layout
-        splitter = QSplitter(Qt.Horizontal)
+        # Trigger initial data
+        self.profile_widget.update_data()
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.render_widget)
         splitter.addWidget(self.profile_widget)
-        splitter.setStretchFactor(0, 3)  # 3D view is larger
+        splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
 
         self.setCentralWidget(splitter)
 
-        # Instructions Overlay
         overlay = QLabel(
             "Controls:\nLeft Drag: Rotate\nAlt+Drag: Roll\nMiddle Drag: Pan XY\nScroll: Pan Z",
             self.render_widget
@@ -257,4 +233,4 @@ def run_gui(scene):
     app = QApplication(sys.argv)
     window = CamWindow(scene)
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

@@ -3,7 +3,7 @@ import torch.nn as nn
 from .base import Scene
 from ..elements import ParaxialDistMat
 
-class SequentialSystem(nn.Module):
+class SequentialScene(Scene):
 
     def __init__(self, elements):
         super().__init__()
