@@ -72,12 +72,111 @@ class Camera:
         return Rays(origins, dirs, device=self.device)
 
 
+class OrbitCamera(Camera):
+    """
+    Standard CAD-style camera that orbits around a Pivot point.
+    """
+
+    def __init__(self, pivot=(0, 0, 0), **kwargs):
+        super().__init__(**kwargs)
+        self.pivot = torch.tensor(pivot, dtype=torch.float32, device=kwargs.get('device', 'cpu'))
+
+        # Ensure we are pointing at the pivot initially
+        self.update_view_matrix()
+
+    def update_view_matrix(self):
+        """Re-calculates Forward/Right/Up based on Orbit logic."""
+        direction = self.pivot - self.origin
+        dist = torch.norm(direction)
+        if dist < 1e-3: return
+
+        self.forward = direction / dist
+
+        # Standard Orbit: Right is Cross(Forward, WorldUp)
+        # This keeps the horizon level.
+        world_up = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        self.right = torch.cross(self.forward, world_up)
+
+        # Handle gimbal lock (looking straight up/down)
+        if torch.norm(self.right) < 1e-3:
+            self.right = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+
+        self.right = F.normalize(self.right, dim=0)
+        self.up_cam = torch.cross(self.right, self.forward)
+        self.up_cam = F.normalize(self.up_cam, dim=0)
+
+    def orbit(self, d_yaw, d_pitch):
+        """
+        Rotates the camera Position around the Pivot point.
+        """
+        radius_vec = self.origin - self.pivot
+
+        def rotate_vec(vec, axis, angle):
+            c = torch.cos(angle)
+            s = torch.sin(angle)
+            return vec * c + torch.cross(axis, vec) * s + axis * torch.dot(axis, vec) * (1 - c)
+
+        # 1. Yaw (Left/Right Drag) -> Rotate around World Up
+        # We always yaw around strict World Up to maintain "Turntable" feel
+        world_up = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        radius_vec = rotate_vec(radius_vec, world_up, -d_yaw)
+
+        # 2. Pitch (Up/Down Drag) -> Rotate around Local Right
+        # Calculate temp right for the current frame
+        # (This must mimic update_view_matrix logic to stay consistent)
+        current_fwd = F.normalize(radius_vec, dim=0)  # Note: radius_vec points TO camera (opposite of forward)
+        # Actually radius_vec = Origin - Pivot. Forward = Pivot - Origin.
+        # So radius_vec is roughly -Forward.
+
+        # Simple cross to find rotation axis
+        if torch.abs(torch.dot(F.normalize(radius_vec, dim=0), world_up)) > 0.95:
+            temp_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device)  # Fallback X axis
+        else:
+            temp_axis = F.normalize(torch.cross(F.normalize(radius_vec, dim=0), world_up), dim=0)
+
+        # Apply Pitch
+        radius_vec = rotate_vec(radius_vec, temp_axis, d_pitch)
+
+        self.origin = self.pivot + radius_vec
+        self.update_view_matrix()
+
+    def roll(self, angle):
+        """
+        Rolls the camera around its forward axis (Alt + Drag).
+        Note: This breaks the 'steady horizon' of the orbit camera until the next orbit move resets it.
+        """
+        c = torch.cos(angle)
+        s = torch.sin(angle)
+
+        # Rotate Right and Up around Forward
+        new_right = c * self.right - s * self.up_cam
+        new_up = s * self.right + c * self.up_cam
+
+        self.right = new_right
+        self.up_cam = new_up
+
+    def pan(self, dx, dy):
+        """Moves both Camera and Pivot."""
+        move_vec = (self.right * -dx) + (self.up_cam * dy)
+        self.origin += move_vec
+        self.pivot += move_vec
+
+    def zoom(self, delta):
+        radius_vec = self.origin - self.pivot
+        dist = torch.norm(radius_vec)
+        scale = 1.0 - delta * 0.1
+        if dist * scale < 0.1: scale = 1.0
+        self.origin = self.pivot + radius_vec * scale
+
+
 class Renderer:
     """
     Handles visual interaction with the Scene.
     """
 
-    def __init__(self, scene, background_color=(1.0, 1.0, 1.0)):
+    def __init__(self, scene,
+                 background_color=(1.0, 1.0, 1.0),
+                 light_dir=(-0.5, 1.0, -1.0)):
         """
         Args:
             scene: The Scene object containing elements.
@@ -85,6 +184,9 @@ class Renderer:
         """
         self.scene = scene
         self.bg_color = torch.tensor(background_color, device=scene.map_to_element.device)
+
+        ld = torch.as_tensor(light_dir, device=scene.map_to_element.device)
+        self.light_dir = F.normalize(ld, dim=0)
 
     def render_3d(self, camera):
         """
@@ -158,7 +260,7 @@ class Renderer:
                     phys_func = element.surface_functions[j]
 
                     # Compute Color
-                    colors = self._compute_color(phys_func, subset_rays, normal_global)
+                    colors = self._compute_color(phys_func, normal_global)
 
                     # Scatter back to main pixel buffer
                     # We use masked_scatter or indexing
@@ -173,93 +275,65 @@ class Renderer:
 
         return image.cpu()
 
-    def _compute_color(self, phys_func, rays, normals):
+    def _compute_color(self, phys_func, normals):
         """
-        Applies coloring rules and shading based on normal incidence.
+        Applies coloring rules and Fixed Directional Shading.
         """
-        N = rays.pos.shape[0]
-        base_color = torch.zeros(N, 3, device=rays.device)
+        N = normals.shape[0]
+        base_color = torch.zeros(N, 3, device=normals.device)
 
         # --- 1. Base Color Determination ---
-
-        # Helper to check type safely (handling potential string-based fallbacks or classes)
         def is_type(obj, cls_name):
-            if hasattr(obj, '__class__'):
-                return cls_name in obj.__class__.__name__
-            return False
+            return cls_name in obj.__class__.__name__
 
-        # Rule: Reflect -> Bright Orange
         if is_type(phys_func, 'Reflect'):
-            base_color[:] = torch.tensor([1.0, 0.6, 0.0], device=rays.device)
-
-        # Rule: Block -> Dark Gray
+            base_color[:] = torch.tensor([1.0, 0.6, 0.0], device=normals.device)
         elif is_type(phys_func, 'Block'):
-            base_color[:] = torch.tensor([0.2, 0.2, 0.2], device=rays.device)
-
-        # Rule: Transmit -> Green
+            base_color[:] = torch.tensor([0.2, 0.2, 0.2], device=normals.device)
         elif is_type(phys_func, 'Transmit'):
-            base_color[:] = torch.tensor([0.0, 1.0, 0.0], device=rays.device)
-
-        # Rule: Refract -> Index Gradient
-        elif is_type(phys_func, 'RefractSnell') or is_type(phys_func, "RefractFresnel"):
-            # Extract index 'n'
-            # Assuming RefractSnell stores 'n_out' or similar,
-            # OR we use the ray's current n vs the medium.
-            # For visualization, let's assume the function has an attribute `n2` (destination index)
-            # If not, default to 1.5
-            n_val1 = getattr(phys_func, 'ior_in', 1.5)
-            n_val2 = getattr(phys_func, 'ior_out', 1.5)
-
-            n_val = torch.max(n_val1, n_val2)
-
-            # If n_val is a tensor, we might need logic, but usually it's scalar per surface
+            base_color[:] = torch.tensor([0.0, 1.0, 0.0], device=normals.device)
+        elif is_type(phys_func, 'Refract'):
+            # Index gradient logic
+            n_val = getattr(phys_func, 'n2', 1.5)
             if isinstance(n_val, torch.Tensor): n_val = n_val.item()
 
-            # Map n 1.0 -> 2.0
-            # 1.0 (White) -> 1.3 (Cyan) -> 1.7 (Navy) -> 2.0 (Purple)
-            c_white = torch.tensor([0.9, 0.9, 0.9], device=rays.device)
-            c_cyan = torch.tensor([0.0, 1.0, 1.0], device=rays.device)
-            c_blue = torch.tensor([0.3, 0.6, 1.0], device=rays.device)  # Light Blue
-            c_navy = torch.tensor([0.0, 0.0, 0.5], device=rays.device)
-            c_purp = torch.tensor([0.3, 0.0, 0.3], device=rays.device)  # Dark Purple
+            c_white = torch.tensor([0.9, 0.9, 0.9], device=normals.device)
+            c_cyan = torch.tensor([0.0, 1.0, 1.0], device=normals.device)
+            c_blue = torch.tensor([0.3, 0.6, 1.0], device=normals.device)
+            c_navy = torch.tensor([0.0, 0.0, 0.5], device=normals.device)
+            c_purp = torch.tensor([0.3, 0.0, 0.3], device=normals.device)
 
             if n_val <= 1.0:
                 col = c_white
             elif n_val <= 1.3:
-                t = (n_val - 1.0) / 0.3
-                col = torch.lerp(c_white, c_cyan, t)
+                col = torch.lerp(c_white, c_cyan, (n_val - 1.0) / 0.3)
             elif n_val <= 1.4:
-                t = (n_val - 1.3) / 0.1
-                col = torch.lerp(c_cyan, c_blue, t)
+                col = torch.lerp(c_cyan, c_blue, (n_val - 1.3) / 0.1)
             elif n_val <= 1.7:
-                t = (n_val - 1.4) / 0.3
-                col = torch.lerp(c_blue, c_navy, t)
+                col = torch.lerp(c_blue, c_navy, (n_val - 1.4) / 0.3)
             else:
-                t = min((n_val - 1.7) / 0.3, 1.0)
-                col = torch.lerp(c_navy, c_purp, t)
+                col = torch.lerp(c_navy, c_purp, min((n_val - 1.7) / 0.3, 1.0))
 
             base_color[:] = col
-
         else:
-            # Fallback for unknown
-            base_color[:] = torch.tensor([1.0, 0.0, 1.0], device=rays.device)  # Magenta
+            base_color[:] = torch.tensor([1.0, 0.0, 1.0], device=normals.device)
 
-        # --- 2. Shading ---
-        # Dot product of Ray Direction and Normal
-        # Since Rays point FROM camera TO object, and Normal points OUT,
-        # they are opposed. We want alignment intensity.
-        # factor = | dot(D, N) |
+        # --- 2. Fixed Directional Shading ---
+        # Lambertian Diffuse: Dot(Normal, LightVec)
+        # We calculate the alignment between the surface normal and the light source.
 
-        dot = torch.sum(rays.dir * normals, dim=1).abs()
+        diffuse_intensity = torch.sum(normals * self.light_dir, dim=1)
 
-        # Modulate: Brightest when perpendicular (dot=1), Darker when glancing (dot=0)
-        # We add an ambient term so it's not pitch black at edges
-        # Brightness = 0.3 + 0.7 * dot
-        shading = 0.3 + 0.7 * dot
-        shading = shading.unsqueeze(1)  # Broadcast to [N, 1]
+        # Clamp to [0, 1] for purely physical light, or take Abs() for
+        # "Two-Sided" lighting (useful to see inside shapes).
+        # We'll use a soft mix:
 
-        final_color = base_color * shading
-        return final_color
+        # 0.3 Ambient + 0.7 Diffuse
+        # We use .abs() here so back-facing polygons are still visible (good for debugging lenses)
+        shading = 0.3 + 0.7 * diffuse_intensity.abs()
+
+        shading = shading.unsqueeze(1)
+        return base_color * shading
 
     def scan_profile(self, target_element, axis='x', num_points=200, bounds=None):
         """

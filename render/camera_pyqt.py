@@ -1,4 +1,4 @@
-from .camera import Renderer, Camera
+from .camera import Renderer, Camera, OrbitCamera
 
 
 # Note: Ensure these imports match your folder structure
@@ -22,7 +22,7 @@ class InteractiveCamera(Camera):
         def rotate_vector(vec, axis, angle):
             cos_a = torch.cos(angle)
             sin_a = torch.sin(angle)
-            return vec * cos_a + torch.cross(axis, vec) * sin_a + axis * torch.dot(axis, vec) * (1 - cos_a)
+            return vec * cos_a + torch.linalg.cross(axis, vec) * sin_a + axis * torch.dot(axis, vec) * (1 - cos_a)
 
         self.forward = rotate_vector(self.forward, self.right, d_pitch)
         self.up_cam = rotate_vector(self.up_cam, self.right, d_pitch)
@@ -56,15 +56,12 @@ class RenderWidget(QLabel):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.last_pos = QPoint(0, 0)
-        self.mouse_sensitivity = 0.005
-        self.move_speed = 0.5
-
-        # Initial Render
+        self._img_buffer = None
         self.refresh_render()
 
     def refresh_render(self):
         try:
-            img_tensor = self.renderer.render_3d(self.camera).cpu()
+            img_tensor = self.renderer.render_3d(self.camera)
             h, w, c = img_tensor.shape
 
             # 2. Force RGBA (4 channels)
@@ -76,7 +73,7 @@ class RenderWidget(QLabel):
             # We create a distinct bytes object. QImage copies this internally
             # when using loadFromData, OR we pass it to constructor.
             # Using tobytes() creates a copy, ensuring no shared memory stride issues.
-            img_data = (torch.clamp(img_tensor, 0, 1) * 255).byte().numpy().tobytes()
+            img_data = (torch.clamp(img_tensor, 0, 1) * 255).byte().numpy()
 
             # 4. Create QImage
             q_img = QImage(
@@ -102,30 +99,37 @@ class RenderWidget(QLabel):
         dy = pos.y() - self.last_pos.y()
         self.last_pos = pos
 
+        orbit_sens = 0.01
+        pan_sens = 0.05
+
+        # 1. Alt + Drag: ROLL (Restored functionality)
         if event.modifiers() & Qt.KeyboardModifier.AltModifier:
-            self.camera.roll(torch.tensor(dx * self.mouse_sensitivity))
+            # Roll uses dx (horizontal drag rotates screen)
+            self.camera.roll(torch.tensor(dx * orbit_sens))
             self.refresh_render()
             return
 
-        if event.buttons() & Qt.MouseButton.MiddleButton:
-            self.camera.move_local(
-                torch.tensor(-dx * self.move_speed * 0.1),
-                torch.tensor(dy * self.move_speed * 0.1),
-                torch.tensor(0.0)
+        # 2. Left Drag: ORBIT
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            # Pass d_yaw (dx) and d_pitch (dy)
+            self.camera.orbit(
+                torch.tensor(dx * orbit_sens),
+                torch.tensor(dy * orbit_sens)
             )
             self.refresh_render()
-            return
 
-        if event.buttons() & Qt.MouseButton.LeftButton:
-            self.camera.rotate_yaw_pitch(
-                torch.tensor(-dx * self.mouse_sensitivity),
-                torch.tensor(-dy * self.mouse_sensitivity)
+        # 3. Middle Drag: PAN
+        elif event.buttons() & Qt.MouseButton.MiddleButton:
+            self.camera.pan(
+                torch.tensor(dx * pan_sens),
+                torch.tensor(dy * pan_sens)
             )
             self.refresh_render()
 
     def wheelEvent(self, event):
+        # ZOOM
         delta = event.angleDelta().y() / 120.0
-        self.camera.move_local(torch.tensor(0.0), torch.tensor(0.0), torch.tensor(delta * self.move_speed * 5.0))
+        self.camera.zoom(torch.tensor(delta))
         self.refresh_render()
 
 
@@ -196,16 +200,19 @@ class CamWindow(QMainWindow):
         self.setWindowTitle("Differentiable Ray Tracer (PyQt6)")
         self.resize(1200, 800)
 
-        device = next(model.parameters()).device
+        device = next(scene.parameters()).device
 
-        self.cam = InteractiveCamera(
-            position=(0, 0, -50), look_at=(0, 0, 0), up_vector=(0, 1, 0),
+        self.cam = OrbitCamera(
+            pivot=(0, 0, 0),
+            position=(0, 0, -60),
+            look_at=(0, 0, 0),
+            up_vector=(0, 1, 0),
             fov_deg=40, width=512, height=512,
             device=device
         )
 
         # Renderer with visibility
-        self.renderer = Renderer(scene, background_color=(0.1, 0.1, 0.15))
+        self.renderer = Renderer(scene, background_color=(0.9, 0.9, 0.9))
 
         self.render_widget = RenderWidget(self.renderer, self.cam)
         self.profile_widget = ProfileWidget(self.renderer, scene)

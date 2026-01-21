@@ -17,6 +17,8 @@ import RayTraceTorch as rtt
 def test_rendering_pipeline():
     print("--- Starting Headless Render Test ---")
 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     # A. Setup Scene
     scene = rtt.scene.Scene()
 
@@ -55,10 +57,10 @@ def test_rendering_pipeline():
         height=1024,
         device=device # Use CPU for safety in test
     )
-    
+
     print("Camera setup complete.")
 
-    scene.to('cuda')
+    scene.to(device)
     # C. Initialize Renderer
     # Background color: Dark Blue (0.1, 0.1, 0.3)
     renderer = rtt.render.Renderer(scene, background_color=(0.1, 0.1, 0.1))
