@@ -1,7 +1,4 @@
-from .camera import Renderer, Camera, OrbitCamera
-
-
-# Note: Ensure these imports match your folder structure
+from ..render.camera import Renderer, Camera, OrbitCamera
 # from ..rays.ray import Rays
 
 import sys

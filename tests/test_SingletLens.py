@@ -25,7 +25,7 @@ def test_vals():
     print(LensMat.numpy())
 
     lens1 = SingletLens(c1 = 1/150.0, c2 = 1/-20.0, d=10.0, t=3.0, ior_glass=1.2, ior_media=1.0)
-    lens1.status()
+    # lens1.status()
 
     # for name, param in lens1.named_parameters():
     #     print(f"Name: {name}, Shape: {param.shape}")

@@ -82,7 +82,7 @@ def collimatedSource(origin, direction, radius, N_rays, ray_id=0, device='cpu'):
     final_dirs = torch.as_tensor(direction, dtype=torch.float32, device=device)
     final_dirs = final_dirs.unsqueeze(0).expand(num_valid, 3)  # Broadcast
 
-    return Rays(final_origins, final_dirs, ray_id=ray_id, device=device)
+    return Rays.initialize(final_origins, final_dirs, ray_id=ray_id, device=device)
 
 
 def collimatedLineSource(center, ray_direction, line_direction, length, N_rays, ray_id=1, 
@@ -95,7 +95,7 @@ def collimatedLineSource(center, ray_direction, line_direction, length, N_rays, 
     origins = (length * torch.linspace(-0.5, 0.5, N_rays)[:, None] * line_direction[None, :]
                + torch.as_tensor(center)[None, :])
     
-    return Rays(origins, direction, ray_id=ray_id, device=device, dtype=dtype)
+    return Rays.initialize(origins, direction, ray_id=ray_id, device=device, dtype=dtype)
 
 
 def fanSource(origin, ray_direction, fan_angle, fan_direction, N_rays, ray_id=1, device='cpu', dtype=torch.float32):
@@ -108,7 +108,7 @@ def fanSource(origin, ray_direction, fan_angle, fan_direction, N_rays, ray_id=1,
     directions = F.normalize(directions)
 
 
-    return Rays(origin, directions, ray_id=ray_id, device=device, dtype = dtype)
+    return Rays.initialize(origin, directions, ray_id=ray_id, device=device, dtype = dtype)
 
 
 def pointSource(origin, direction, half_angle_rad, N_rays, ray_id=1, device='cpu'):
@@ -149,38 +149,6 @@ def pointSource(origin, direction, half_angle_rad, N_rays, ray_id=1, device='cpu
     # 3. Origins (all at the source point)
     final_origins = origin.repeat(N_rays, 1)
 
-    return Rays(final_origins, final_dirs, ray_id=ray_id, device=device)
+    return Rays.initialize(final_origins, final_dirs, ray_id=ray_id, device=device)
 
 
-def gaussianBeam(origin, direction, waist_radius, N_rays, ray_id=0, device='cpu'):
-    """
-    Creates a Gaussian beam distribution (Ray density follows Gaussian intensity).
-
-    Args:
-        origin (list/tensor): [x, y, z] Center of the beam waist.
-        direction (list/tensor): [x, y, z] Propagation direction.
-        waist_radius (float): The 1/e^2 intensity radius (w0).
-        N_rays (int): Exact number of rays to generate.
-    """
-    origin = torch.as_tensor(origin, dtype=torch.float32, device=device)
-
-    # 1. Sample Gaussian Distribution in Local XY
-    # For intensity I(r) ~ exp(-2r^2/w0^2), the position standard deviation sigma = w0 / 2.
-    sigma = waist_radius / 2.0
-
-    local_x = torch.randn(N_rays, device=device) * sigma
-    local_y = torch.randn(N_rays, device=device) * sigma
-    local_z = torch.zeros(N_rays, device=device)
-
-    local_points = torch.stack([local_x, local_y, local_z], dim=1)
-
-    # 2. Rotate and Translate
-    R = _generate_basis_from_direction(direction, device)
-    points_rotated = local_points @ R
-    final_origins = points_rotated + origin
-
-    # 3. Directions (Parallel at the waist)
-    final_dirs = torch.as_tensor(direction, dtype=torch.float32, device=device)
-    final_dirs = final_dirs.unsqueeze(0).repeat(N_rays, 1)
-
-    return Rays(final_origins, final_dirs, ray_id=ray_id, device=device)

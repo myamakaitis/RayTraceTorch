@@ -393,3 +393,14 @@ class QuadricZY(Quadric):
         local_normal = raw_normal / (norm_len + 1e-8)
 
         return -local_normal
+
+
+class Cone(Surface):
+    def __init__(self):
+        raise NotImplementedError()
+
+
+class WedgeYZ(Cone):
+
+    def __init__(self):
+        raise NotImplementedError()

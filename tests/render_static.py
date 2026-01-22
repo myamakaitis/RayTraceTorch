@@ -24,14 +24,14 @@ def test_rendering_pipeline():
 
     # Create a dummy element
     element1 = rtt.elements.Element()
-    element1.shape = rtt.geom.Sphere(radius=5.0)
+    element1.shape = rtt.geom.Sphere(radius=2.0)
     element1.surface_functions.append(rtt.phys.Reflect())
 
     element2 = rtt.elements.Element()
-    element2.shape = rtt.geom.Sphere(radius=5.0, transform=rtt.geom.RayTransform(translation = [0, -3, 10]))
+    element2.shape = rtt.geom.Sphere(radius=2.0, transform=rtt.geom.RayTransform(translation = [0, -5, 0]))
     element2.surface_functions.append(rtt.phys.Reflect())
 
-    shape3 = rtt.geom.Box(height=7, width=7, length=7)
+    shape3 = rtt.geom.Box(height=7, width=7, length=7, transform=rtt.geom.RayTransform(translation = [0, 0, -20]))
     element3 = rtt.elements.Element()
     element3.shape = shape3
     for _ in range(len(element3.shape)):
@@ -48,7 +48,7 @@ def test_rendering_pipeline():
 
     # B. Setup Camera
     # Positioned at Z=-20, looking at Z=0
-    cam = rtt.render.Camera(
+    cam = rtt.render.OrbitCamera(
         position=(-30, 0, 0),
         look_at=(0, 0, 0),
         up_vector=(0, 1, 0),
@@ -63,7 +63,7 @@ def test_rendering_pipeline():
     scene.to(device)
     # C. Initialize Renderer
     # Background color: Dark Blue (0.1, 0.1, 0.3)
-    renderer = rtt.render.Renderer(scene, background_color=(0.1, 0.1, 0.1))
+    renderer = rtt.render.Renderer(scene, background_color=(0.9, 0.9, 0.9))
 
     # D. Execute Render (The Critical Step)
     try:
