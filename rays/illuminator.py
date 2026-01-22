@@ -1,24 +1,44 @@
 
 from torch.distriubtions import Distribution, constraints
 
-class Illuminator(Distribution):
+from geom import RayTransform
 
-    def __init__(self, batch_shape, event_shape):
 
-        super().__init__(self, batch_shape=batch_shape, event_shape=event_shape)
+class Illuminator():
+
+    def __init__(self, ray_id, device):
 
         raise NotImplementedError()
 
-    def sample(self):
+    def sample(self, Nsamples):
         raise NotImplementedError()
 
 
-class RandomPointSource(Illuminator):
+class RandPointSource(Illuminator):
 
-    def __init__(self):
+    def __init__(self, center, light_direction, numerical_aperture, ray_id, device):
+
+        super().__init__(ray_id, device)
+
         raise NotImplementedError()
 
+class RandCollimatedSource(Illuminator):
 
+    def __init__(self, center, sample_shape, light_direction, ray_id, device):
+
+        super().__init__(ray_id, device)
+
+        raise NotImplementedError()
+
+class PanelSource(RandPointSource):
+
+    def __init__(self, sample_shape, light_direction, transform: RayTransform, ray_id, device):
+
+        super().__init_([0, 0, 0], [0, 0, 1], )
+
+class LambertianPanelSource(Illuminator):
+
+    def __init__(self, center, light_direction, transform: RayTransform, ray_id, device):
 
 def gaussianBeam(origin, direction, waist_radius, N_rays, ray_id=0, device='cpu'):
     """
@@ -53,9 +73,8 @@ def gaussianBeam(origin, direction, waist_radius, N_rays, ray_id=0, device='cpu'
 
     return Rays(final_origins, final_dirs, ray_id=ray_id, device=device)
 
-def panelSource(height, width, center, light_direction, numerical_aperture, ):
-    raise NotImplementedError()
 
-def ringLight()
+
+
 
 
