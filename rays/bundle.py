@@ -1,32 +1,37 @@
 import torch
-import math
+
+from geom import RayTransform
 from .ray import Rays
 import torch.nn.functional as F
 
-def _generate_basis_from_direction(direction, device):
-    """
-    Constructs an orthonormal basis [u, v, w] where w is aligned with 'direction'.
-    This allows us to create 2D shapes (disks/cones) and rotate them to point anywhere.
-    """
-    w = torch.as_tensor(direction, dtype=torch.float32, device=device)
-    w = F.normalize(w, p=2, dim=0)  # Normalize primary axis
+class Bundle:
 
-    # Arbitrary 'up' vector to compute orthogonal axes
-    # If w is close to global Y [0,1,0], use X [1,0,0] as temp up to avoid singularity
-    if torch.abs(w[1]) > 0.99:
-        temp_up = torch.tensor([1.0, 0.0, 0.0], device=device)
-    else:
-        temp_up = torch.tensor([0.0, 1.0, 0.0], device=device)
+    def __init__(self, ray_id, device='cpu', dtype=torch.float32, transform: RayTransform):
 
-    u = torch.cross(temp_up, w)
-    u = F.normalize(u, p=2, dim=0)
+        self.ray_id = ray_id
+        self.device = device
+        self.dtype = dtype
+        self.transform = transform
 
-    v = torch.cross(w, u)
-    v = F.normalize(v, p=2, dim=0)
+    def sample(self, N):
 
-    # Return shape [3, 3] where rows are u, v, w
-    # We can use this to rotate local vectors: v_global = v_local @ basis
-    return torch.stack([u, v, w])
+        pos = self.sample_pos(N)
+        dir = self.sample_dir(N)
+
+        pos, dir =
+
+        return Rays.initialize(pos, dir, ray_id=self.ray_id, device=self.device, dtype=self.dtype)
+
+
+class Collimated(Bundle):
+
+    def __init__(self, transform: RayTransform, ray_id: int, device: str, dtype: torch.dtype):
+        super().__init__(ray_id=ray_id, device=device, dtype=dtype)
+        self.transform = transform
+
+    def sample_dir(self, N):
+        return torch.as_tensor([[0, 0, 1]], device=self.device, dtype=self.dtype).repeat(N, 1)
+
 
 
 def collimatedSource(origin, direction, radius, N_rays, ray_id=0, device='cpu'):
@@ -44,7 +49,7 @@ def collimatedSource(origin, direction, radius, N_rays, ray_id=0, device='cpu'):
     origin = torch.as_tensor(origin, dtype=torch.float32, device=device)
 
     # 1. Create a 2D Grid on the local XY plane (z=0)
-    grid_side = int(math.sqrt(N_rays))
+    grid_side = int(torch.sqrt(N_rays))
     if grid_side < 1: grid_side = 1
 
     t = torch.linspace(-radius, radius, grid_side, device=device)

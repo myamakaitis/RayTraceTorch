@@ -1,8 +1,5 @@
 import torch
 import torch.nn.functional as F
-
-import torch
-import torch.nn.functional as F
 from tensordict import tensorclass
 from typing import Optional
 
@@ -69,7 +66,7 @@ class Rays:
         else:
             wavelengths = torch.as_tensor(wavelengths, device=device, dtype=torch.float32)
 
-        ids = torch.full((N,), ray_id, dtype=torch.long, device=device)
+        ids = torch.full((N,), ray_id, dtype=torch.int8, device=device)
 
         # Instantiate the tensorclass
         # batch_size must be provided
@@ -80,6 +77,21 @@ class Rays:
             id=ids,
             wavelength=wavelengths,
             batch_size=[N]
+        )
+
+    def with_coords(self, new_pos, new_dir):
+        """
+        Returns a new Rays object with updated geometry but shared metadata.
+        """
+        # We assume the batch size (Number of Rays) hasn't changed.
+        # If new_pos has a different N, this will raise a shape error (Safety!).
+        return Rays(
+            pos=new_pos,
+            dir=new_dir,
+            intensity=self.intensity,  # Passes reference (Zero Memory Overhead)
+            id=self.id,  # Passes reference
+            wavelength=self.wavelength,  # Passes reference
+            batch_size=self.batch_size  # Required by tensorclass
         )
 
 
