@@ -1,23 +1,28 @@
 import torch
 import torch.nn.functional as F
-from .rays import
+from .bundle import Bundle
 
-class Illuminator():
-
-    def __init__(self, batch_shape, event_shape):
-
-        super().__init__(self, batch_shape=batch_shape, event_shape=event_shape)
-
-        raise NotImplementedError()
-
-    def sample(self):
-        raise NotImplementedError()
-
-
-class RandomPointSource(Illuminator):
+class PointSource(Bundle):
 
     def __init__(self):
         raise NotImplementedError()
+
+
+class PanelSource(PointSource):
+
+    def __init__(self):
+        raise NotImplementedError()
+
+
+class RectangularPanel(PanelSource):
+    def __init__(self, Width: float, Height: float):
+        raise NotImplementedError()
+
+class RingSource(PanelSource):
+    def __init__(self, radius_inner: float, radius_outer: float, ):
+
+        if radius_inner > radius_outer:
+            raise ValueError()
 
 def panelSource(height, width, center, light_direction, numerical_aperture, ):
     raise NotImplementedError()
