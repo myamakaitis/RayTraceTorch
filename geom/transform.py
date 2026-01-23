@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 from typing import Optional, Union, List, Tuple
+from torch.distributions import Normal
 
 Vector3 = Union[torch.Tensor, List[float], Tuple[float, ...]]
 Bool3 = Union[torch.Tensor, List[bool], Tuple[bool, ...]]
@@ -19,7 +20,6 @@ class RayTransform(nn.Module):
             device: 'cpu' or 'cuda'.
         """
         super().__init__()
-        self._dtype = dtype
 
         # Initialize Translation
         if translation is not None:
@@ -130,5 +130,80 @@ class NoisyTransform(RayTransform):
     Transform class that selectively adds random perturbations with a normal distribution to rotation and translation
     useful for optical design with realistic tolerances
     """
-    def __init__(self):
-        raise NotImplementedError()
+    def __init__(self, rotation: Optional[Vector3] = None, translation: Optional[Vector3] = None,
+                 dtype: torch.dtype = torch.float32,
+                 std_translation: Optional[Vector3] = (0, 0, 0), std_rotation: Optional[Vector3] = (0, 0, 0),
+                 trans_grad: bool = False, trans_mask: Bool3 = None,
+                 rot_grad: bool = False, rot_mask: Bool3 = None):
+        """
+        Args:
+            rotation: [3, 3] Rotation matrix (Local -> Global).
+            translation: [3] Translation vector (Object position).
+            device: 'cpu' or 'cuda'.
+        """
+        super().__init__(rotation = rotation, translation = translation, dtype = dtype,
+                         trans_grad = trans_grad, trans_mask = trans_mask,
+                         rot_grad = rot_grad, rot_mask=rot_mask)
+
+        self.cached_trans_noise = None
+        self.cached_rot_noise = None
+
+        self.zero = torch.nn.Parameter(torch.zeros(3, dtype=dtype), requires_grad = False)
+
+        self.trans_scale = torch.nn.Parameter(torch.as_tensor(trans_grad, dtype=dtype), requires_grad=False)
+        self.rot_scale = torch.nn.Parameter(torch.as_tensor(rot_grad, dtype=dtype), requires_grad=False)
+
+        self.trans_dist = Normal(self.zero, self.trans_scale)
+        self.rot_dist = Normal(self.zero, self.rot_scale)
+
+
+    def _compute_matrix_batch(self, rot_vec_batch):
+
+        N = rot_vec_batch.shape[0]
+
+        x, y, z = self.rot_vec[:, 0], self.rot_vec[:, 1], self.rot_vec[:, 2]
+        K = torch.zeros((N, 3, 3), device=self.rot_vec.device, dtype=self.rot_vec.dtype)
+        K[:, 0, 1], K[:, 0, 2] = -z, y
+        K[:, 1, 0], K[:, 1, 2] = z, -x
+        K[:, 2, 0], K[:, 2, 1] = -y, x
+        return torch.linalg.matrix_exp(K)
+
+    def addNoise(self, N):
+
+        trans_noise = self.trans[:, None] + self.trans_dist.sample((N, ))
+        rot_noise = self.rot_dist[:, None] + self.rot_dist.sample((N, ))
+
+        return trans_noise, rot_noise
+
+    def transform(self, rays):
+
+        trans_noise, rot_noise = self.addNoise(rays.batch_size)
+        rot = self._compute_matrix_batch(rot_noise)
+
+        shifted_pos = rays.pos - trans_noise
+
+        local_pos = torch.bmm(shifted_pos, rot)
+        local_dir = torch.bmm(rays.dir, rot)
+
+        self.cached_trans_noise = torch.tensor([])
+        self.cached_rot_noise = torch.tensor([])
+
+        return local_pos, local_dir
+
+    def invTransform(self, rays):
+
+        with torch.no_grad():
+            if self.cached_trans_noise.shape[0] == rays.batch_size:
+                trans_noise, rot_noise = self.cached_trans_noise, self.cached_rot_noise
+            else:
+                trans_noise, rot_noise = self.addNoise(rays.batch_size)
+
+        rot = self._compute_matrix_batch(rot_noise)
+
+        unshifted_pos = torch.bmm(rays.pos, rot.transpose(1, 2))
+        global_dir = torch.bmm(rays.dir, rot.transpose(1, 2))
+
+        global_pos = rays.pos + trans_noise
+
+        return local_pos, local_dir
+
