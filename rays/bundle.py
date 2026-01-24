@@ -7,7 +7,7 @@ from torch.distributions import Uniform
 
 class Bundle:
 
-    def __init__(self, ray_id, device='cpu', dtype=torch.float32, transform: RayTransform):
+    def __init__(self, ray_id, device='cpu', dtype=torch.float32, transform: RayTransform = None):
 
         self.ray_id = ray_id
         self.device = device
