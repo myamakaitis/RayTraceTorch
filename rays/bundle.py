@@ -53,7 +53,7 @@ class Point(Bundle):
 
 class DiskSample:
 
-    def __init__(self, radius_inner: torch.Tensor, radius_outer: torch.Tensor, theta_min: torch.Tensor, theta_max: torch.Tensor):
+    def __init__(self, radius_inner_2: torch.Tensor, radius_outer_2: torch.Tensor, theta_min: torch.Tensor, theta_max: torch.Tensor):
 
         self.r_distribution = Uniform(radius_inner_2, radius_outer_2)
         self.t_distribution = Uniform(theta_min, theta_max)
@@ -129,7 +129,7 @@ class Fan(Collimated):
 
         raise NotImplementedError()
 
-class PointSource(Point)
+class PointSource(Point):
     """
     Creates a diverging cone of rays from a point source.
     """
