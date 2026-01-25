@@ -72,7 +72,7 @@ def test_thin_lens_conjugate_points():
     direction = [0.0, 0.0, 1.0]  # Pointing +Z
 
     # Create a cone of rays
-    rays = rtt.rays.pointSource(origin, direction, half_angle_rad=0.05, N_rays=100)
+    rays = rtt.rays.PointSource(0.3, 1, transform = RayTransform(translation=origin)).sample(100)
 
     # 2. Intersect
     # IdealThinLens has only 1 surface at index 0

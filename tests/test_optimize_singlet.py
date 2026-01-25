@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from RayTraceTorch.elements import SingletLens
-from RayTraceTorch.rays import Rays, collimatedSource
+from RayTraceTorch.rays import Rays, CollimatedDisk
+from RayTraceTorch.geom import RayTransform
 # Assuming these imports exist in your project structure
 # from my_library import SingletLens, Rays, collimatedSource
 
@@ -59,6 +60,8 @@ def test_singlet_optimization():
     # ---------------------------------------------------------
     steps = 100
 
+    CS = CollimatedDisk(5.0, 1, transform=RayTransform(translation=[0, 0, -10]))
+    n_batch = 300
 
     def closure():
         optimizer.zero_grad()
@@ -68,13 +71,7 @@ def test_singlet_optimization():
         # We regenerate rays inside the loop if we wanted to randomize them,
         # but for static optics, generating once is usually fine.
         # Doing it here ensures we have a fresh batch.
-        rays = collimatedSource(
-            origin=[0, 0, -20],
-            direction=[0, 0, 1],
-            radius=12,
-            N_rays=5000,
-            device=device
-        )
+        rays = CS.sample(n_batch)
 
         p0 = rays.pos.clone()
 

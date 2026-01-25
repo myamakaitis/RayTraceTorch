@@ -178,9 +178,6 @@ class SingletLens(Element):
             self.shape.C1.copy_(c1_new)
             self.shape.C2.copy_(c2_new)
 
-    def __repr__(self):
-        return f"{self.__name__} - f = {self.f}"
-
 
 class CylSingletLens(SingletLens):
 

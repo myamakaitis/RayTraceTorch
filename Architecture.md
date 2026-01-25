@@ -27,6 +27,7 @@ Defines the spatial boundaries, intersection math, and complex optical shapes. A
 * **`transform.py`**:
     * **Class `RayTransform(nn.Module)`**: Handles 4x4 affine transformations.
         * **Attributes**: `trans` (Translation parameter), `rot_vec` (Rotation parameter/buffer).
+            * Translation is always applied first, so that the vector always indicates relative positions in the parent frame
         * **Methods**:
             * `transform(rays)`: Maps Global $\to$ Local coordinates.
             * `invTransform(rays)`: Maps Local $\to$ Global coordinates.

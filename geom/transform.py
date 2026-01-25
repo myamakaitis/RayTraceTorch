@@ -62,6 +62,10 @@ class RayTransform(nn.Module):
         return self._compute_matrix()
 
     def transform(self, rays):
+
+        return self.transform_(rays.pos, rays.dir)
+
+    def transform_(self, _pos, _dir):
         """
         Applies the transformation (Local -> Global).
         New Pos = (Pos @ R.T) + T
@@ -76,15 +80,18 @@ class RayTransform(nn.Module):
         # Apply Rotation (P @ R.T is standard for row-vector multiplication)
 
         # Inverse Translation
-        shifted_pos = rays.pos - self.trans[None, :]
+        shifted_pos = _pos - self.trans[None, :]
 
         local_pos = shifted_pos @ self.rot
-        local_dir = rays.dir @ self.rot
+        local_dir = _dir @ self.rot
 
         return local_pos, local_dir
 
-
     def invTransform(self, rays):
+
+        return self.invTransform_(rays.pos, rays.dir)
+
+    def invTransform_(self, _pos, _dir):
         """
         Applies the INVERSE transformation (Global -> Local).
         New Pos = (Pos - T) @ R
@@ -99,8 +106,8 @@ class RayTransform(nn.Module):
         # Here self.rot is Local_to_Global. So we need to multiply by R_inverse.
         # @ R.T rotates forward. v @ R rotates backward.
 
-        global_pos = (rays.pos @ self.rot.T) + self.trans[None, :]
-        global_dir = (rays.dir @ self.rot.T)
+        global_pos = (_pos @ self.rot.T) + self.trans[None, :]
+        global_dir = (_dir @ self.rot.T)
 
         return global_pos, global_dir
 
@@ -173,35 +180,37 @@ class NoisyTransform(RayTransform):
 
         return trans_noise, rot_noise
 
-    def transform(self, rays):
+    def transform_(self, _pos, _dir):
 
-        trans_noise, rot_noise = self.addNoise(rays.batch_size)
+        trans_noise, rot_noise = self.addNoise(_pos.size(0))
         rot = self._compute_matrix_batch(rot_noise)
 
-        shifted_pos = rays.pos - trans_noise
+        shifted_pos = _pos - trans_noise
 
         local_pos = torch.bmm(shifted_pos, rot)
-        local_dir = torch.bmm(rays.dir, rot)
+        local_dir = torch.bmm(_dir, rot)
 
         self.cached_trans_noise = torch.tensor([])
         self.cached_rot_noise = torch.tensor([])
 
         return local_pos, local_dir
 
-    def invTransform(self, rays):
+    def invTransform_(self, _pos, _dir):
+
+        batch_size = _pos.size(0)
 
         with torch.no_grad():
-            if self.cached_trans_noise.shape[0] == rays.batch_size:
+            if self.cached_trans_noise.size(0) == batch_size:
                 trans_noise, rot_noise = self.cached_trans_noise, self.cached_rot_noise
             else:
-                trans_noise, rot_noise = self.addNoise(rays.batch_size)
+                trans_noise, rot_noise = self.addNoise(batch_size)
 
         rot = self._compute_matrix_batch(rot_noise)
 
-        unshifted_pos = torch.bmm(rays.pos, rot.transpose(1, 2))
-        global_dir = torch.bmm(rays.dir, rot.transpose(1, 2))
+        unshifted_pos = torch.bmm(_pos, rot.transpose(1, 2))
+        global_dir = torch.bmm(_dir, rot.transpose(1, 2))
 
-        global_pos = rays.pos + trans_noise
+        global_pos = unshifted_pos + trans_noise
 
         return global_pos, global_dir
 

@@ -4,8 +4,18 @@ import math
 import sys
 import os
 
-from geom import Plane, Sphere, Quadric, RayTransform
-from rays import Rays
+import sys
+import os
+import matplotlib.pyplot as plt
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+import RayTraceTorch as rtt
+
+Rays = rtt.rays.Rays
+from RayTraceTorch.geom import Plane, Sphere, Quadric, RayTransform
+
+
 
 
 def create_rays(positions, directions):

@@ -1,17 +1,18 @@
 import torch
 import matplotlib.pyplot as plt
+import numpy as np
 import sys
 import os
-import numpy as np
+import matplotlib.pyplot as plt
 
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-# Ensure we can import from src
-# sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+import RayTraceTorch
 
-from geom import Singlet, RayTransform
-from geom import Doublet, Triplet, CylSinglet
-from geom import Box
-from rays import Rays
+from RayTraceTorch.geom import Singlet, RayTransform
+from RayTraceTorch.geom import Doublet, Triplet, CylSinglet
+from RayTraceTorch.geom import Box
+from RayTraceTorch.rays import Rays
 
 
 def scan_lens_profile(lens, axis='x', num_points=200):
