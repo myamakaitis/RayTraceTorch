@@ -7,7 +7,7 @@ from torch.distributions import Uniform
 
 class Bundle:
 
-    def __init__(self, ray_id, device='cpu', dtype=torch.float32, transform: RayTransform = None):
+    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
 
         self.ray_id = ray_id
         self.device = device
@@ -32,8 +32,8 @@ class Bundle:
 
 class Collimated(Bundle):
 
-    def __init__(self, transform: RayTransform, ray_id: int, device: str, dtype: torch.dtype):
-        super().__init__(ray_id=ray_id, device=device, dtype=dtype)
+    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform)
         self.transform = transform
 
     def sample_dir(self, N):
@@ -42,12 +42,11 @@ class Collimated(Bundle):
 
 class Point(Bundle):
 
-    def __init__(self, transform: RayTransform, ray_id: int, device: str, dtype: torch.dtype):
-        super().__init__(ray_id=ray_id, device=device, dtype=dtype)
+    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform)
         self.transform = transform
 
     def sample_pos(self, N):
-
         return torch.zeros((N, 3), device=self.device, dtype=self.dtype)
 
 
@@ -82,7 +81,8 @@ class SolidAngleSample:
 
 class CollimatedDisk(Collimated):
 
-    def __init__(self, radius: float, transform: RayTransform, ray_id: int, device: str, dtype: torch.dtype):
+    def __init__(self, radius: float,
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -99,7 +99,8 @@ class CollimatedDisk(Collimated):
 
 class CollimatedLine(Collimated):
 
-    def __init__(self, length: float, transform: RayTransform, ray_id: int, device: str, dtype: torch.dtype):
+    def __init__(self, length: float,
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -118,7 +119,8 @@ class CollimatedLine(Collimated):
 
 class Fan(Collimated):
 
-    def __init__(self, angle: float, transform: RayTransform, ray_id: int, device: str, dtype: torch.dtype):
+    def __init__(self, angle: float,
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -134,7 +136,8 @@ class PointSource(Point):
     Creates a diverging cone of rays from a point source.
     """
 
-    def __init__(self, NA: float, transform: RayTransform, ray_id: int, device: str, dtype: torch.dtype):
+    def __init__(self, NA: float,
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
         self.NA = torch.tensor([NA], device=device, dtype=dtype)
