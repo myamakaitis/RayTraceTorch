@@ -2,16 +2,11 @@ import torch
 import matplotlib.pyplot as plt
 import sys
 import os
-import numpy as np
 
-# Ensure we can import from src
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+import RayTraceTorch as rtt
 # Assuming the new module is accessible via geom.cylindrics or added to geom/__init__.py
 # Adjust the import based on where you saved the file.
-from geom.cylindrics import CylSinglet
-from geom import RayTransform
-from rays import Rays
 
 
 def scan_lens_profile(lens, axis='x', num_points=200):
@@ -47,7 +42,7 @@ def scan_lens_profile(lens, axis='x', num_points=200):
         directions = torch.tensor([[0.0, 0.0, 1.0]]).expand(num_points, 3)
 
     # Create Rays
-    rays = Rays(origins, directions)
+    rays = rtt.Rays.initialize(origins, directions)
 
     # Intersect
     # t_matrix: [N, NumSurfaces]
@@ -120,14 +115,14 @@ def test_cylinders():
     # 1. Bi-Convex Cylindrical Singlet (Power in Y)
     # R_y = 50, Width=30, Height=20, T=10
     print("Generating Bi-Convex Cylinder...")
-    c1 = CylSinglet(C1=1 / torch.tensor(50.0), C2=1 / torch.tensor(-50.0),
+    c1 = rtt.elements.CylSinglet(C1=1 / torch.tensor(50.0), C2=1 / torch.tensor(-50.0),
                     width=torch.tensor(30.0), height=torch.tensor(20.0), T=torch.tensor(10.0))
     plot_lens(c1, "Bi-Convex CylSinglet", "cyl_biconvex.png")
 
     # 2. Plano-Convex Cylindrical Singlet (Power in Y)
     # R_y = 30 (Front), Flat (Back), Width=20, Height=25, T=5
     print("Generating Plano-Convex Cylinder...")
-    c2 = CylSinglet(C1=1 / torch.tensor(30.0), C2=torch.tensor(0.0),
+    c2 =  rtt.elements.CylSinglet(C1=1 / torch.tensor(30.0), C2=torch.tensor(0.0),
                     width=torch.tensor(20.0), height=torch.tensor(25.0), T=torch.tensor(8.0))
     plot_lens(c2, "Plano-Convex CylSinglet", "cyl_plano.png")
 
@@ -135,6 +130,6 @@ def test_cylinders():
     # Check if the edges are correctly placed at +/- Width/2 and +/- Height/2
     # We use a very thick lens to see the edges clearly
     print("Generating Thick Block for Edge Check...")
-    c3 = CylSinglet(C1=torch.tensor(1/-50.0), C2=torch.tensor(1/50.0),
+    c3 =  rtt.elements.CylSinglet(C1=torch.tensor(1/-50.0), C2=torch.tensor(1/50.0),
                     width=torch.tensor(40.0), height=torch.tensor(20.0), T=torch.tensor(2.0))
     plot_lens(c3, "Bi-Concave CylSinglet", "cyl_biconcave.png")

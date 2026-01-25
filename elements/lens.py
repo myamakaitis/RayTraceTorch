@@ -144,7 +144,7 @@ class SingletLens(Element):
         return Zs, Mats
 
 
-    def Bend(self):
+    def Bend(self, delta_c):
         """
         Adjust R1 and R2 without changing total Power (Focal Length).
         Adds 'delta_c' to c1 and solves for the new c2.
@@ -316,7 +316,7 @@ class DoubletLens(Element):
         Mats = []
         for i in range(3):
 
-            M = ParaxialRefractMat(Cs[i], Cs[i], iors[i], iorsp[i+1])
+            M = ParaxialRefractMat(Cs[i], Cs[i], iors[i], iors[i+1])
             Mats.append(T_inv @ M @ T)
 
         return Zs, Mats
@@ -423,7 +423,7 @@ class TripletLens(Element):
         Mats = []
         for i in range(4):
 
-            M = ParaxialRefractMat(Cs[i], Cs[i], iors[i], iorsp[i+1])
+            M = ParaxialRefractMat(Cs[i], Cs[i], iors[i], iors[i+1])
             Mats.append(T_inv @ M @ T)
 
         return Zs, Mats

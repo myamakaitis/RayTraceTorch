@@ -250,12 +250,12 @@ class Quadric(Surface):
     c(x^2 + y^2) + c(1+k)z^2 - 2z = 0
 
     Parameters:
-        c (float): Curvature (1/Radius). c=0 implies a plane.
-        k (float): Conic constant.
+        c (Parameter): Curvature (1/Radius). c=0 implies a plane.
+        k (Parameter): Conic constant.
                    k=0 (Sphere), k=-1 (Parabola), k<-1 (Hyperbola).
     """
 
-    def __init__(self, c:float, k:float, transform: RayTransform = None,
+    def __init__(self, c: float, k: float, transform: RayTransform = None,
                  c_grad: bool = False, k_grad: bool = False):
 
         super().__init__(transform = transform)

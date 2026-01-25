@@ -36,9 +36,9 @@ def test_Plane():
     plane = Plane(RayTransform(translation=planeTranslation))
 
     # 1. Rays pointing directly at plane from -Z
-    pos = [[0, 0, -10], [1, 1, -5], [-2, -2, -10]]
-    dir = [[0, 0, 1], [0, 0, 1], [0, 0, 1]]
-    rays = create_rays(pos, dir)
+    _pos = [[0, 0, -10], [1, 1, -5], [-2, -2, -10]]
+    _dir = [[0, 0, 1], [0, 0, 1], [0, 0, 1]]
+    rays = create_rays(_pos, _dir)
 
     t, hits, norms, _ = plane(rays)
 

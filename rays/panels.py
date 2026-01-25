@@ -1,18 +1,16 @@
 import torch
 import torch.nn.functional as F
-from .bundle import Bundle
+from .bundle import SolidAngleSample, DiskSample, Bundle, PointSource
+from torch.distributions import Uniform
+from ..geom import RayTransform
 
-class PointSource(Bundle):
+def LambertianSample():
+    pass
 
-    def __init__(self):
-        raise NotImplementedError()
+class PanelSource(Bundle):
 
-
-class PanelSource(PointSource):
-
-    def __init__(self):
-        raise NotImplementedError()
-
+    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+        super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
 class RectangularPanel(PanelSource):
     def __init__(self, Width: float, Height: float):
@@ -24,10 +22,12 @@ class RingSource(PanelSource):
         if radius_inner > radius_outer:
             raise ValueError()
 
-def panelSource(height, width, center, light_direction, numerical_aperture, ):
+
+def DiskLightPanel(height, width, center, light_direction, numerical_aperture, ):
     raise NotImplementedError()
 
-def ringLight():
+
+def RingLightPanel():
     raise NotImplementedError()
 
 

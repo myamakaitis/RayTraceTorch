@@ -14,40 +14,19 @@ class Bundle:
         self.dtype = dtype
         self.transform = transform
 
-    def sample_dir(self, N):
-        raise NotImplementedError()
-
-    def sample_pos(self, N):
-        raise NotImplementedError()
-
-    def sample(self, N):
-
-        pos = self.sample_pos(N)
-        dir = self.sample_dir(N)
-
-        raise NotImplementedError() ### NEED TRANSFORM LOGIC
-
-        return Rays.initialize(pos, dir, ray_id=self.ray_id, device=self.device, dtype=self.dtype)
-
-
-class Collimated(Bundle):
-
-    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
-        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform)
-        self.transform = transform
-
-    def sample_dir(self, N):
+    def sample_dir(self, N: int):
         return torch.tensor([[0, 0, 1]], device=self.device, dtype=self.dtype).repeat(N, 1)
 
-
-class Point(Bundle):
-
-    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
-        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform)
-        self.transform = transform
-
-    def sample_pos(self, N):
+    def sample_pos(self, N: int):
         return torch.zeros((N, 3), device=self.device, dtype=self.dtype)
+
+    def sample(self, N: int):
+
+        _pos = self.sample_pos(N)
+        _dir = self.sample_dir(N)
+
+        # raise NotImplementedError() ### NEED TRANSFORM LOGIC
+        return Rays.initialize(_pos, _dir, ray_id=self.ray_id, device=self.device, dtype=self.dtype)
 
 
 class DiskSample:
@@ -57,7 +36,7 @@ class DiskSample:
         self.r_distribution = Uniform(radius_inner_2, radius_outer_2)
         self.t_distribution = Uniform(theta_min, theta_max)
 
-    def sample(self, N):
+    def sample(self, N: int):
 
         theta = self.t_distribution.sample((N,))
         r = torch.sqrt(self.r_distribution.sample((N,)))
@@ -75,25 +54,25 @@ class SolidAngleSample:
         self.phi_distribution = Uniform(F_phi_min, F_phi_max)
         self.t_distribution = Uniform(theta_min, theta_max)
 
-    def sample(self, N):
+    def sample(self, N: int):
 
-        theta = self.t_distribution.sample((N,))
         phi = self.invCDF_phi(self.phi_distribution.sample((N,)))
+        theta = self.t_distribution.sample((N,))
 
         return phi, theta
 
     @classmethod
-    def invCDF_phi(cls, phi : torch.Tensor):
+    def invCDF_phi(cls, F : torch.Tensor):
 
-        return torch.acos(-2*(phi)  + 1)
+        return torch.acos(-2*(F)  + 1)
 
     @classmethod
     def CDF_phi(cls, phi : torch.Tensor):
 
-        return 0.5 * (1 - torch.cos(phi))
+        return (1 - torch.cos(phi)) / torch.pi
 
 
-class CollimatedDisk(Collimated):
+class CollimatedDisk(Bundle):
 
     def __init__(self, radius: float,
                  ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
@@ -102,16 +81,16 @@ class CollimatedDisk(Collimated):
 
         self.radius2 = torch.as_tensor(radius*radius, device=device, dtype=dtype)
         self.zero = torch.tensor([0.0], device=device, dtype=dtype)
-        self.tmax = torch.tensor([torch.pi], device=device, dtype=dtype)
+        self.tmax = torch.tensor([2*torch.pi], device=device, dtype=dtype)
 
         self.disk = DiskSample(self.zero, self.radius2, self.zero, self.tmax)
 
-    def sample_pos(self, N):
+    def sample_pos(self, N: int):
 
-        return self.disk.sample((N,))
+        return self.disk.sample(N)
 
 
-class CollimatedLine(Collimated):
+class CollimatedLine(Bundle):
 
     def __init__(self, length: float,
                  ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
@@ -121,17 +100,22 @@ class CollimatedLine(Collimated):
         self.length_2 = torch.tensor([length], device=device, dtype=dtype)
         self.x_sampler = Uniform(-self.length_2, self.length_2)
 
-    def sample_pos(self, N):
+    def sample_pos(self, N: int):
 
         pos = torch.cat([
-            self.x_sampler.sample((N,1)),
+            self.x_sampler.sample((N,)),
             torch.zeros((N, 2), device=self.device, dtype=self.dtype)
         ], dim=1)
 
         return pos
 
 
-class Fan(Collimated):
+class Fan(Bundle):
+
+    """
+    2D fan source,
+    default fan spreads in y-direction
+    """
 
     def __init__(self, angle: float,
                  ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
@@ -139,13 +123,16 @@ class Fan(Collimated):
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
         self.angle_2 = torch.tensor([angle/2], device=device, dtype=dtype)
-
+        self.theta_dist = Uniform(-self.angle_2, self.angle_2)
 
     def sample_dir(self, N):
 
-        raise NotImplementedError()
+        theta = self.theta_dist.sample((N,))
 
-class PointSource(Point):
+        return torch.stack([torch.zeros_like(theta), torch.sin(theta), torch.cos(theta)], dim=1)
+
+
+class PointSource(Bundle):
     """
     Creates a diverging cone of rays from a point source.
     """
@@ -158,20 +145,19 @@ class PointSource(Point):
         self.zero = torch.tensor([0.0], device=device, dtype=dtype)
         self.twopi = torch.tensor([2*torch.pi], device=device, dtype=dtype)
 
-        rad = np.arcsin(NA)
+        rad = torch.arcsin(torch.tensor(NA, device=device, dtype=dtype))
 
-        self.F_phi_max = SolidAngleSample.invCDF_phi(rad)
+        self.F_phi_max = SolidAngleSample.CDF_phi(rad)
 
-        self.angleSample = SolidAngleSample(self.zero, self.F_phi_max, self.zero, self.twopi)
+        self.angle_dist = SolidAngleSample(self.zero, self.F_phi_max, self.zero, self.twopi)
 
     def sample_dir(self, N):
 
+        phi, theta = self.angle_dist.sample(N)
 
-        collimated = torch.tensor([[0, 0, 1]], device=self.device, dtype=self.dtype).repeat(N, 1)
+        dz = torch.cos(phi)
+        dr = torch.sin(phi)
 
-        phi, theta = self.phiSample.sample(N)
+        dx, dy = torch.cos(theta)*dr, torch.sin(theta)*dr
 
-        # apply phi (rotation about x-axis)
-        # apply theta (rotation about z-axis)
-
-        return direction
+        return torch.stack([dx, dy, dz], dim=1)

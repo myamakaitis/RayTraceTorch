@@ -4,10 +4,10 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+import RayTraceTorch as rtt
 
-from RayTraceTorch.elements import IdealThinLens
-from RayTraceTorch.rays import Rays, pointSource
-from RayTraceTorch.geom import RayTransform
+IdealThinLens = rtt.elements.IdealThinLens
+RayTransform = rtt.geom.RayTransform
 
 
 def find_point_of_least_confusion_svd(rays_pos, rays_dir):
@@ -72,7 +72,7 @@ def test_thin_lens_conjugate_points():
     direction = [0.0, 0.0, 1.0]  # Pointing +Z
 
     # Create a cone of rays
-    rays = pointSource(origin, direction, half_angle_rad=0.05, N_rays=100)
+    rays = rtt.rays.pointSource(origin, direction, half_angle_rad=0.05, N_rays=100)
 
     # 2. Intersect
     # IdealThinLens has only 1 surface at index 0
@@ -151,7 +151,7 @@ def test_magnification_and_gradients():
         dirs = torch.stack([torch.sin(thetas), torch.zeros_like(thetas), torch.cos(thetas)], dim=-1)
         start = torch.zeros_like(dirs)
 
-        rays_grad = Rays(start, dirs)
+        rays_grad = rtt.rays.Rays(start, dirs)
 
 
     rays_grad.pos = rays_grad.pos + origin[None, :]

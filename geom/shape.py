@@ -144,15 +144,15 @@ class Box(CvxPolyhedron):
 
     @property
     def length(self):
-        return surfaces[0].transform.trans[2] - surfaces[1].transform.trans[2]
+        return self.surfaces[0].transform.trans[2] - self.surfaces[1].transform.trans[2]
 
     @property
     def width(self):
-        return surfaces[2].transform.trans[0] - surfaces[3].transform.trans[0]
+        return self.surfaces[2].transform.trans[0] - self.surfaces[3].transform.trans[0]
 
     @property
     def height(self):
-        return surfaces[4].transform.trans[1] - surfaces[5].transform.trans[1]
+        return self.surfaces[4].transform.trans[1] - self.surfaces[5].transform.trans[1]
 
     def _build_surfaces(self, length, width, height, l_grad, w_grad, h_grad):
         """
@@ -222,11 +222,11 @@ class Box4Side(CvxPolyhedron):
 
     @property
     def width(self):
-        return surfaces[0].transform.trans[0] - surfaces[1].transform.trans[0]
+        return self.surfaces[0].transform.trans[0] - self.surfaces[1].transform.trans[0]
 
     @property
     def height(self):
-        return surfaces[2].transform.trans[1] - surfaces[3].transform.trans[1]
+        return self.surfaces[2].transform.trans[1] - self.surfaces[3].transform.trans[1]
 
     def _build_surfaces(self, width, height, w_grad, h_grad):
         """

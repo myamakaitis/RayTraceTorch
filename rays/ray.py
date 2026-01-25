@@ -40,13 +40,14 @@ class Rays:
         self.intensity = self.intensity.index_put(idx, new_intensity)
 
     @classmethod
-    def initialize(cls, origins, directions, wavelengths=None, intensities=None, ray_id=0, device='cpu'):
+    def initialize(cls, origins, directions, wavelengths=None, intensities=None,
+                   ray_id: int =0, device: str ='cpu', dtype: torch.dtype = torch.float32):
         """
         A factory method to handle your specific initialization logic
         (broadcasting, default values) that acts as your old __init__.
         """
-        origins = torch.as_tensor(origins, device=device, dtype=torch.float32)
-        directions = torch.as_tensor(directions, device=device, dtype=torch.float32)
+        origins = torch.as_tensor(origins, device=device, dtype=dtype)
+        directions = torch.as_tensor(directions, device=device, dtype=dtype)
 
         # Handle broadcasting
         if origins.ndim == 1: origins = origins.unsqueeze(0)
@@ -56,15 +57,15 @@ class Rays:
 
         # Handle defaults
         if intensities is None:
-            intensities = torch.ones(N, device=device, dtype=torch.float32)
+            intensities = torch.ones(N, device=device, dtype=dtype)
         else:
-            intensities = torch.as_tensor(intensities, device=device, dtype=torch.float32)
+            intensities = torch.as_tensor(intensities, device=device, dtype=dtype)
 
         if wavelengths is None:
             # Create dummy wavelengths to satisfy tensor structure (e.g., zeros)
-            wavelengths = torch.zeros(N, device=device, dtype=torch.float32)
+            wavelengths = torch.zeros(N, device=device, dtype=dtype)
         else:
-            wavelengths = torch.as_tensor(wavelengths, device=device, dtype=torch.float32)
+            wavelengths = torch.as_tensor(wavelengths, device=device, dtype=dtype)
 
         ids = torch.full((N,), ray_id, dtype=torch.int8, device=device)
 
@@ -95,54 +96,51 @@ class Rays:
         )
 
 
-class Paths(Rays):
-    """
-    Child of Rays that automatically logs position history for 3D visualization.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # History is a list of tensors to avoid constant concatenation overhead
-        # We detach() history for plotting to save memory, as we usually
-        # don't need gradients for the visualization path itself.
-        self.pos_hist = [self.pos.clone().detach()]
-        self.dir_hist = [self.dir.clone().detach()]
-        self.intensity_hist = [self.intensity.clone().detach()]
-
-    def update(self, new_pos, new_dir, intensity_mult):
-        """
-        Updates position and appends to history.
-        """
-        # Call the parent update to handle state change
-        super().update(new_pos, new_dir, intensity_mult)
-
-        # Append new position to history (detached for viz efficiency)
-        self.pos_hist.append(self.pos.clone().detach())
-        self.dir_hist.append(self.dir.clone().detach())
-        self.intensity_hist.append(self.intensity.clone().detach())
-
-    def get_pos_hist(self):
-        """Returns the ray paths as a Tensor of shape [Steps, N, 3]"""
-        return torch.stack(self.pos_hist)
-
-    def get_dir_hist(self):
-        return torch.stack(self.dir_hist)
-
-    def get_intensity_hist(self):
-        return torch.stack(self.intensity_hist)
-
-    def test_history_consistency(self):
-
-        with torch.no_grad():
-            pos_hist = self.get_pos_hist()
-
-            dir_finite_diff = pos_hist[1:, :] - pos_hist[:-1, :]
-            dir_finite_diff = F.normalize(dir_finite_diff, p=2, dim=2)
-
-            dir_hist = self.get_dir_hist()[:-1]
-
-        return torch.allclose(dir_finite_diff, dir_hist)
-
-
-
+# class Paths(Rays):
+#     """
+#     Child of Rays that automatically logs position history for 3D visualization.
+#     """
+#
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
+#
+#         # History is a list of tensors to avoid constant concatenation overhead
+#         # We detach() history for plotting to save memory, as we usually
+#         # don't need gradients for the visualization path itself.
+#         self.pos_hist = [self.pos.clone().detach()]
+#         self.dir_hist = [self.dir.clone().detach()]
+#         self.intensity_hist = [self.intensity.clone().detach()]
+#
+#     def update(self, new_pos, new_dir, intensity_mult):
+#         """
+#         Updates position and appends to history.
+#         """
+#         # Call the parent update to handle state change
+#         super().update(new_pos, new_dir, intensity_mult)
+#
+#         # Append new position to history (detached for viz efficiency)
+#         self.pos_hist.append(self.pos.clone().detach())
+#         self.dir_hist.append(self.dir.clone().detach())
+#         self.intensity_hist.append(self.intensity.clone().detach())
+#
+#     def get_pos_hist(self):
+#         """Returns the ray paths as a Tensor of shape [Steps, N, 3]"""
+#         return torch.stack(self.pos_hist)
+#
+#     def get_dir_hist(self):
+#         return torch.stack(self.dir_hist)
+#
+#     def get_intensity_hist(self):
+#         return torch.stack(self.intensity_hist)
+#
+#     def test_history_consistency(self):
+#
+#         with torch.no_grad():
+#             pos_hist = self.get_pos_hist()
+#
+#             dir_finite_diff = pos_hist[1:, :] - pos_hist[:-1, :]
+#             dir_finite_diff = F.normalize(dir_finite_diff, p=2, dim=2)
+#
+#             dir_hist = self.get_dir_hist()[:-1]
+#
+#         return torch.allclose(dir_finite_diff, dir_hist)

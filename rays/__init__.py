@@ -1,7 +1,10 @@
-from .ray import Rays, Paths
-from .bundle import *
+from .ray import Rays
+from .bundle import Bundle, PointSource, CollimatedDisk, Fan, CollimatedLine
 from .panels import *
-from .beam import *
-try: from .particle import *
-except ImportError: pass
+from .beam import GaussianBeam
+
+try:
+    from .particle import *
+except ImportError:
+    pass
 

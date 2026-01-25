@@ -17,7 +17,6 @@ class RayTransform(nn.Module):
         Args:
             rotation: [3, 3] Rotation matrix (Local -> Global).
             translation: [3] Translation vector (Object position).
-            device: 'cpu' or 'cuda'.
         """
         super().__init__()
 
@@ -139,7 +138,6 @@ class NoisyTransform(RayTransform):
         Args:
             rotation: [3, 3] Rotation matrix (Local -> Global).
             translation: [3] Translation vector (Object position).
-            device: 'cpu' or 'cuda'.
         """
         super().__init__(rotation = rotation, translation = translation, dtype = dtype,
                          trans_grad = trans_grad, trans_mask = trans_mask,
@@ -205,5 +203,5 @@ class NoisyTransform(RayTransform):
 
         global_pos = rays.pos + trans_noise
 
-        return local_pos, local_dir
+        return global_pos, global_dir
 
