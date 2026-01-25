@@ -48,7 +48,7 @@ def scan_lens_profile(lens, axis='x', num_points=200):
         directions = torch.tensor([[0.0, 0.0, 1.0]]).expand(num_points, 3)
 
     # Create Rays
-    rays = Rays(origins, directions)
+    rays = Rays.initialize(origins, directions)
 
     # Intersect
     # t_matrix: [N, NumSurfaces]

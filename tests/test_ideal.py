@@ -8,6 +8,7 @@ import RayTraceTorch as rtt
 
 IdealThinLens = rtt.elements.IdealThinLens
 RayTransform = rtt.geom.RayTransform
+RayTransformBundle = rtt.geom.RayTransformBundle
 
 
 def find_point_of_least_confusion_svd(rays_pos, rays_dir):
@@ -64,15 +65,13 @@ def test_thin_lens_conjugate_points():
     f_physical = 100.0
     lens = IdealThinLens(focal=f_physical)
 
-
-
     # 1. Define Point Source at Z = -200 (so = 200)
     so = 2 * f_physical
     origin = [0.0, 0.0, -so]
     direction = [0.0, 0.0, 1.0]  # Pointing +Z
 
     # Create a cone of rays
-    rays = rtt.rays.PointSource(0.3, 1, transform = RayTransform(translation=origin)).sample(100)
+    rays = rtt.rays.PointSource(0.3, 1, transform = RayTransformBundle(translation=origin)).sample(100)
 
     # 2. Intersect
     # IdealThinLens has only 1 surface at index 0
@@ -151,7 +150,7 @@ def test_magnification_and_gradients():
         dirs = torch.stack([torch.sin(thetas), torch.zeros_like(thetas), torch.cos(thetas)], dim=-1)
         start = torch.zeros_like(dirs)
 
-        rays_grad = rtt.rays.Rays(start, dirs)
+        rays_grad = rtt.rays.Rays.initialize(start, dirs)
 
 
     rays_grad.pos = rays_grad.pos + origin[None, :]

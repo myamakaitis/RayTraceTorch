@@ -19,11 +19,11 @@ RayTransform = rtt.geom.RayTransform
 def VisualizePhys(surfFunc, test_name, nrays = 15):
 
 
-    rays = Fan(1.5913, 1).sample(nrays)
+    rays = Fan(1.5913, 1, transform=rtt.geom.RayTransformBundle(translation=[0, 0, -100])).sample(nrays)
 
     inf_plane = Element()
 
-    plane = Plane(transform = RayTransform(translation=[0, 0, 10]))
+    plane = Plane(transform = rtt.geom.RayTransform(translation=[0, 0, 0]))
     inf_plane.shape = plane
 
     inf_plane.surface_functions.append(surfFunc)

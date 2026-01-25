@@ -9,7 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from RayTraceTorch.elements import SingletLens
 from RayTraceTorch.rays import Rays, CollimatedDisk
-from RayTraceTorch.geom import RayTransform
+from RayTraceTorch.geom import RayTransformBundle
 # Assuming these imports exist in your project structure
 # from my_library import SingletLens, Rays, collimatedSource
 
@@ -60,8 +60,8 @@ def test_singlet_optimization():
     # ---------------------------------------------------------
     steps = 100
 
-    CS = CollimatedDisk(5.0, 1, transform=RayTransform(translation=[0, 0, -10]))
-    n_batch = 300
+    CS = CollimatedDisk(5.0, 1, transform=RayTransformBundle(translation=[0, 0, -10]).to(device), device=device)
+    n_batch = 30000
 
     def closure():
         optimizer.zero_grad()
@@ -81,7 +81,8 @@ def test_singlet_optimization():
 
         # Update Ray state for next intersection
         # We assume Rays class allows updating or we create a new wrapper
-        rays.update(p1, d1, mult)
+        rays.pos = p1
+        rays.dir = d1
 
         # C. Propagate through Surface 2 (Back)
         p2, d2, _ = lens(rays, surf_idx=1)

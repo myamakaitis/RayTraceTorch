@@ -1,18 +1,22 @@
 import torch
 
-from geom import RayTransform
+from ..geom import RayTransformBundle
 from .ray import Rays
 import torch.nn.functional as F
 from torch.distributions import Uniform
 
 class Bundle:
 
-    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
 
         self.ray_id = ray_id
         self.device = device
         self.dtype = dtype
-        self.transform = transform
+
+        if transform is None:
+            self.transform = RayTransformBundle()
+        else:
+            self.transform = transform
 
     def sample_dir(self, N: int):
         return torch.tensor([[0, 0, 1]], device=self.device, dtype=self.dtype).repeat(N, 1)
@@ -25,8 +29,9 @@ class Bundle:
         _pos = self.sample_pos(N)
         _dir = self.sample_dir(N)
 
-        # raise NotImplementedError() ### NEED TRANSFORM LOGIC
-        return Rays.initialize(_pos, _dir, ray_id=self.ray_id, device=self.device, dtype=self.dtype)
+        pos_global, dir_global = self.transform.transform_(_pos, _dir)
+
+        return Rays.initialize(pos_global, dir_global, ray_id=self.ray_id, device=self.device, dtype=self.dtype)
 
 
 class DiskSample:
@@ -38,8 +43,8 @@ class DiskSample:
 
     def sample(self, N: int):
 
-        theta = self.t_distribution.sample((N,))
-        r = torch.sqrt(self.r_distribution.sample((N,)))
+        theta = self.t_distribution.sample((N,)).squeeze()
+        r = torch.sqrt(self.r_distribution.sample((N,))).squeeze()
 
         x = r * torch.cos(theta)
         y = r * torch.sin(theta)
@@ -56,8 +61,8 @@ class SolidAngleSample:
 
     def sample(self, N: int):
 
-        phi = self.invCDF_phi(self.phi_distribution.sample((N,)))
-        theta = self.t_distribution.sample((N,))
+        phi = self.invCDF_phi(self.phi_distribution.sample((N,))).squeeze()
+        theta = self.t_distribution.sample((N,)).squeeze()
 
         return phi, theta
 
@@ -75,7 +80,7 @@ class SolidAngleSample:
 class CollimatedDisk(Bundle):
 
     def __init__(self, radius: float,
-                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -93,7 +98,7 @@ class CollimatedDisk(Bundle):
 class CollimatedLine(Bundle):
 
     def __init__(self, length: float,
-                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -118,7 +123,7 @@ class Fan(Bundle):
     """
 
     def __init__(self, angle: float,
-                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -127,7 +132,7 @@ class Fan(Bundle):
 
     def sample_dir(self, N):
 
-        theta = self.theta_dist.sample((N,))
+        theta = self.theta_dist.sample((N,)).squeeze()
 
         return torch.stack([torch.zeros_like(theta), torch.sin(theta), torch.cos(theta)], dim=1)
 
@@ -138,7 +143,7 @@ class PointSource(Bundle):
     """
 
     def __init__(self, NA: float,
-                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 

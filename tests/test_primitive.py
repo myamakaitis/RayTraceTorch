@@ -16,11 +16,9 @@ Rays = rtt.rays.Rays
 from RayTraceTorch.geom import Plane, Sphere, Quadric, RayTransform
 
 
-
-
 def create_rays(positions, directions):
     """Helper to create a Rays object batch."""
-    return Rays(positions, directions)
+    return Rays.initialize(positions, directions)
 
 def check_ray_equation(rays, t, hit_points):
     """
@@ -191,7 +189,7 @@ def test_plane_translation_grad():
     # Normalize manually or rely on Rays class
     directions = directions / torch.norm(directions, dim=1, keepdim=True)
 
-    rays = Rays(origins, directions, device=device)
+    rays = Rays.initialize(origins, directions, device=device)
 
     # 4. Forward Pass: Intersect
     t, hit_point, normals, _ = plane(rays)
@@ -269,7 +267,7 @@ def test_quadratic_translation_grad():
     # Normalize manually or rely on Rays class
     directions = directions / torch.norm(directions, dim=1, keepdim=True)
 
-    rays = Rays(origins, directions, device=device)
+    rays = Rays.initialize(origins, directions, device=device)
 
     # 4. Forward Pass: Intersect
     t, hit_point, normals, _ = quadric(rays)

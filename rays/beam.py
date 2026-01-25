@@ -7,7 +7,7 @@ from torch.distributions import Normal
 class GaussianBeam(Bundle):
 
     def __init__(self, diameter_1e2_x, diameter_1e2_y,
-            ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
+            ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 

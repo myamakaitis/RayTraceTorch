@@ -131,7 +131,7 @@ class RayTransform(nn.Module):
 
         return Mat
 
-class NoisyTransform(RayTransform):
+class RayTransformNoisy(RayTransform):
     """
     Transform class that selectively adds random perturbations with a normal distribution to rotation and translation
     useful for optical design with realistic tolerances
@@ -214,3 +214,41 @@ class NoisyTransform(RayTransform):
 
         return global_pos, global_dir
 
+
+class RayTransformBundle(RayTransform):
+
+    def transform_(self, _pos, _dir):
+        """
+        Applies the transformation (Local -> Global).
+        New Pos = (Pos @ R.T) + T
+        New Dir = (Dir @ R.T)
+
+        Returns a NEW Rays object (non-destructive).
+        """
+        # Create a copy of the rays to avoid modifying the input in-place
+        # We assume Rays class has a mechanism to copy or we create new one
+        # Ideally, we create new tensors and instantiate a new Rays object.
+
+        # Apply Rotation (P @ R.T is standard for row-vector multiplication)
+
+        shifted_pos = _pos + self.trans[None, :]
+
+        global_pos = shifted_pos @ self.rot.T
+        global_dir = _dir @ self.rot.T
+
+        return global_pos, global_dir
+
+
+    def invTransform_(self, _pos, _dir):
+        """
+        Applies the INVERSE transformation (Global -> Local).
+        New Pos = (Pos - T) @ R
+        New Dir = Dir @ R
+
+        Returns a NEW Rays object.
+        """
+
+        global_pos = (_pos @ self.rot) - self.trans[None, :]
+        global_dir = (_dir @ self.rot)
+
+        return global_pos, global_dir
