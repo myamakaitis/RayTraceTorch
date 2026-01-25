@@ -70,13 +70,27 @@ class DiskSample:
 
 class SolidAngleSample:
 
-    def __init__(self, phi_min: torch.Tensor, phi_max: torch.Tensor, theta_min: torch.Tensor, theta_max: torch.Tensor):
+    def __init__(self, F_phi_min: torch.Tensor, F_phi_max: torch.Tensor, theta_min: torch.Tensor, theta_max: torch.Tensor):
 
-        self.phi_distribution = Uniform(phi_min, phi_max)
+        self.phi_distribution = Uniform(F_phi_min, F_phi_max)
         self.t_distribution = Uniform(theta_min, theta_max)
 
     def sample(self, N):
-        raise NotImplementedError()
+
+        theta = self.t_distribution.sample((N,))
+        phi = self.invCDF_phi(self.phi_distribution.sample((N,)))
+
+        return phi, theta
+
+    @classmethod
+    def invCDF_phi(cls, phi : torch.Tensor):
+
+        return torch.acos(-2*(phi)  + 1)
+
+    @classmethod
+    def CDF_phi(cls, phi : torch.Tensor):
+
+        return 0.5 * (1 - torch.cos(phi))
 
 
 class CollimatedDisk(Collimated):
@@ -86,7 +100,7 @@ class CollimatedDisk(Collimated):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
-        self.radius2 = torch.as_tensor(radius, device=device, dtype=dtype)
+        self.radius2 = torch.as_tensor(radius*radius, device=device, dtype=dtype)
         self.zero = torch.tensor([0.0], device=device, dtype=dtype)
         self.tmax = torch.tensor([torch.pi], device=device, dtype=dtype)
 
@@ -140,9 +154,24 @@ class PointSource(Point):
                  ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransform = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
-        self.NA = torch.tensor([NA], device=device, dtype=dtype)
 
+        self.zero = torch.tensor([0.0], device=device, dtype=dtype)
+        self.twopi = torch.tensor([2*torch.pi], device=device, dtype=dtype)
+
+        rad = np.arcsin(NA)
+
+        self.F_phi_max = SolidAngleSample.invCDF_phi(rad)
+
+        self.angleSample = SolidAngleSample(self.zero, self.F_phi_max, self.zero, self.twopi)
 
     def sample_dir(self, N):
 
-        raise NotImplementedError()
+
+        collimated = torch.tensor([[0, 0, 1]], device=self.device, dtype=self.dtype).repeat(N, 1)
+
+        phi, theta = self.phiSample.sample(N)
+
+        # apply phi (rotation about x-axis)
+        # apply theta (rotation about z-axis)
+
+        return direction
