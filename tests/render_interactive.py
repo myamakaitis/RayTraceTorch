@@ -25,7 +25,7 @@ def render():
     scene1._build_index_maps()
     scene1.to('cuda')
 
-    rtt.render.run_gui(scene1)
+    rtt.gui.run_gui(scene1)
 
 if __name__ == '__main__':
     render()

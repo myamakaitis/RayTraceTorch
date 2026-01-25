@@ -69,7 +69,7 @@ class Camera:
         # Normalize handled by Rays __init__
         origins = self.origin.expand_as(dirs)
 
-        return Rays(origins, dirs, device=self.device)
+        return Rays.initialize(origins, dirs, device=self.device)
 
 
 class OrbitCamera(Camera):
@@ -95,14 +95,14 @@ class OrbitCamera(Camera):
         # Standard Orbit: Right is Cross(Forward, WorldUp)
         # This keeps the horizon level.
         world_up = torch.tensor([0.0, 1.0, 0.0], device=self.device)
-        self.right = torch.cross(self.forward, world_up)
+        self.right = torch.linalg.cross(self.forward, world_up)
 
         # Handle gimbal lock (looking straight up/down)
         if torch.norm(self.right) < 1e-3:
             self.right = torch.tensor([1.0, 0.0, 0.0], device=self.device)
 
         self.right = F.normalize(self.right, dim=0)
-        self.up_cam = torch.cross(self.right, self.forward)
+        self.up_cam = torch.linalg.cross(self.right, self.forward)
         self.up_cam = F.normalize(self.up_cam, dim=0)
 
     def orbit(self, d_yaw, d_pitch):
@@ -114,7 +114,7 @@ class OrbitCamera(Camera):
         def rotate_vec(vec, axis, angle):
             c = torch.cos(angle)
             s = torch.sin(angle)
-            return vec * c + torch.cross(axis, vec) * s + axis * torch.dot(axis, vec) * (1 - c)
+            return vec * c + torch.linalg.cross(axis, vec) * s + axis * torch.dot(axis, vec) * (1 - c)
 
         # 1. Yaw (Left/Right Drag) -> Rotate around World Up
         # We always yaw around strict World Up to maintain "Turntable" feel
@@ -132,7 +132,7 @@ class OrbitCamera(Camera):
         if torch.abs(torch.dot(F.normalize(radius_vec, dim=0), world_up)) > 0.95:
             temp_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device)  # Fallback X axis
         else:
-            temp_axis = F.normalize(torch.cross(F.normalize(radius_vec, dim=0), world_up), dim=0)
+            temp_axis = F.normalize(torch.linalg.cross(F.normalize(radius_vec, dim=0), world_up), dim=0)
 
         # Apply Pitch
         radius_vec = rotate_vec(radius_vec, temp_axis, d_pitch)
@@ -190,90 +190,59 @@ class Renderer:
 
     def render_3d(self, camera):
         """
-        Performs a single-bounce ray cast from the camera and returns an image tensor.
-
-        Returns:
-            image: Tensor [H, W, 3] suitable for matplotlib or PyQt.
+        Performs a single-bounce ray cast using the Scene's shared logic.
         """
+        self.scene._build_index_maps()
         rays = camera.generate_rays()
 
-        # 1. Intersect Scene (Find nearest hit)
-        # We reuse the logic from Scene.step() manually to get normals/material info
-        # without triggering the physics bounce updates.
+        # 1. Use Shared Scene Logic
+        # This returns ONLY the geometry hits, ignoring ray intensity
+        result = self.scene.ray_cast(rays)
 
-        with torch.no_grad():
-            # Collect 't' from all elements
-            t_candidates = []
-            for element in self.scene.elements:
-                t_candidates.append(element.intersectTest(rays))
+        # Default Background
+        pixel_colors = self.bg_color.expand(rays.batch_size[0], 3).clone()
 
-            # [N_rays, Total_Surfaces]
-            t_matrix = torch.cat(t_candidates, dim=1)
+        if result is None:
+            return pixel_colors.reshape(camera.height, camera.width, 3).cpu()
 
-            # Find closest hit
-            min_t, global_hit_idx = torch.min(t_matrix, dim=1)
+        hit_mask, winner_elem_ids, winner_surf_ids = result
 
-            # Identify hits vs misses
-            hit_mask = min_t < float('inf')
+        if not hit_mask.any():
+            return pixel_colors.reshape(camera.height, camera.width, 3).cpu()
 
-            # Initialize Output Image (default to background)
-            pixel_colors = self.bg_color.expand(rays.N, 3).clone()
+        # 2. Compute Colors for Hits
+        # We only loop to get Normals and Material properties, which are specific to visual rendering
+        unique_elements = torch.unique(winner_elem_ids[hit_mask])
 
-            if not hit_mask.any():
-                return pixel_colors.reshape(camera.height, camera.width, 3).cpu()
+        for k_tensor in unique_elements:
+            k = k_tensor.item()
+            element = self.scene.elements[k]
 
-            # Retrieve ID mappings from Scene buffer
-            winner_elem_ids = self.scene.map_to_element[global_hit_idx]
-            winner_surf_ids = self.scene.map_to_surface[global_hit_idx]
+            # Mask for rays hitting Element K
+            elem_mask = (winner_elem_ids == k) & hit_mask
 
-            # Iterate over unique elements hit to compute Normals and Shading
-            # (Vectorized per element to allow batch shape/normal calls)
-            unique_elements = torch.unique(winner_elem_ids[hit_mask])
+            # Mask for specific surfaces
+            surfs_on_elem = winner_surf_ids[elem_mask]
+            unique_surfs = torch.unique(surfs_on_elem)
 
-            for k_tensor in unique_elements:
-                k = k_tensor.item()
-                element = self.scene.elements[k]
+            for j_tensor in unique_surfs:
+                j = j_tensor.item()
+                specific_mask = elem_mask & (winner_surf_ids == j)
 
-                # Mask for Rays hitting Element K
-                elem_mask = (winner_elem_ids == k) & hit_mask
+                # Get Rays for Normal Calculation
+                subset_rays = rays[specific_mask]
 
-                # Further break down by Surface Index on this element
-                # (Because Element.forward usually requires specific surf_idx for shape calculation)
-                surfs_on_elem = winner_surf_ids[elem_mask]
-                unique_surfs = torch.unique(surfs_on_elem)
+                # Call Shape to get Normals
+                _, _, normal_global, _ = element.shape(subset_rays, j)
 
-                for j_tensor in unique_surfs:
-                    j = j_tensor.item()
+                # Determine Color based on Physics Type
+                phys_func = element.surface_functions[j]
+                colors = self._compute_color(phys_func, normal_global)
 
-                    # Rays hitting Element K, Surface J
-                    specific_mask = elem_mask & (winner_surf_ids == j)
+                # Scatter to pixel buffer
+                pixel_colors[specific_mask] = colors
 
-                    # Subset rays for calculation
-                    # We need the Ray state to compute the Normal (via shape(rays))
-                    subset_rays = rays.subset(specific_mask)
-
-                    # Call Shape to get Normals (Global)
-                    # shape.forward signature: returns _, hit_point, normal, local_hit
-                    _, _, normal_global, _ = element.shape(subset_rays, j)
-
-                    # Determine Physics Type for Coloring
-                    phys_func = element.surface_functions[j]
-
-                    # Compute Color
-                    colors = self._compute_color(phys_func, normal_global)
-
-                    # Scatter back to main pixel buffer
-                    # We use masked_scatter or indexing
-                    # pixel_colors[specific_mask] = colors
-                    # Note: indexing with boolean mask in PyTorch flattens target
-                    pixel_colors[specific_mask] = colors
-
-        # Reshape to Image
-        image = pixel_colors.reshape(camera.height, camera.width, 3)
-        # Clamp just in case
-        image = torch.clamp(image, 0.0, 1.0)
-
-        return image.cpu()
+        return torch.clamp(pixel_colors.reshape(camera.height, camera.width, 3), 0.0, 1.0).cpu()
 
     def _compute_color(self, phys_func, normals):
         """
@@ -376,7 +345,7 @@ class Renderer:
 
         directions = torch.tensor([0.0, 0.0, 1.0], device=device).expand(num_points, 3)
 
-        rays = Rays(origins, directions, device=device)
+        rays = Rays.initialize(origins, directions, device=device)
 
         # 3. Intersect
         # We call intersectTest directly on the element

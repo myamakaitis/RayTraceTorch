@@ -8,28 +8,45 @@ class Scene(nn.Module):
         super().__init__()
 
         self.elements = nn.ModuleList()
-        self.rays = None
+        self.rays = torch.tensor(())
         self.Nbounces = 100
 
-        # self._build_index_maps()
+        self._build_index_maps()
+
+    def clear_elements(self):
+        self.elements = nn.ModuleList()
+        self._build_index_maps()
+
+    def clear_rays(self):
+        self.rays = nn.ModuleList()
 
     def _build_index_maps(self):
         """
         Flattens the hierarchy of Element -> Surfaces into global indices
         to allow vectorized lookups.
         """
+        if hasattr(self, 'map_to_element') and isinstance(self.map_to_element, torch.Tensor):
+            device = self.map_to_element.device
+        else:
+            device = torch.device('cpu')
+
+        if len(self.elements) == 0:
+            # Register empty buffers so downstream code (renderers) doesn't crash looking for attributes
+            empty_long = torch.tensor([], dtype=torch.long)
+            self.register_buffer('map_to_element', empty_long)
+            self.register_buffer('map_to_surface', empty_long)
+            self.total_surfaces = 0
+            return
+
         elem_indices = []
         surf_indices = []
 
         for k, element in enumerate(self.elements):
-            # We assume element.shape returns a Shape object which has a known number of surfaces
-            # If explicit surface lists aren't exposed, we rely on the specific implementation
-            # defined in the Architecture.md (e.g., Doublet has 3 surfaces)
-            # Here we assume element.shape.surfaces is a list or similar iterable.
             num_surfaces = len(element.shape)
 
-            elem_indices.append(torch.full((num_surfaces,), k, dtype=torch.long))
-            surf_indices.append(torch.arange(num_surfaces, dtype=torch.long))
+            # 2. Create tensors directly on the correct device
+            elem_indices.append(torch.full((num_surfaces,), k, dtype=torch.long, device=device))
+            surf_indices.append(torch.arange(num_surfaces, dtype=torch.long, device=device))
 
         # Join them into 1D lookup tensors
         # register_buffer ensures they are moved to GPU with the model but not treated as params
@@ -49,95 +66,92 @@ class Scene(nn.Module):
                 break
             self.step()
 
-    def step(self):
+    def ray_cast(self, rays):
         """
-        Performs one bounce for all rays simultaneously.
+        Centralized Intersection Logic.
+        Calculates the closest intersection for a batch of rays against all elements.
+
+        Returns:
+            tuple: (hit_mask, winner_element_ids, winner_surf_ids) or None
         """
-        # 1. INTERSECTION PHASE (Detached / No Grad)
-        # We need to find WHICH element and WHICH surface every ray hit.
+        # Handle empty scene
+        if len(self.elements) == 0:
+            return None
+
+        # 1. Intersection Test (Detached / No Grad)
         with torch.no_grad():
             t_candidates = []
-
-            # Collect intersection distances from all elements
             for element in self.elements:
                 # element.intersectTest returns [N_rays, N_surfaces_in_element]
-                t_candidates.append(element.intersectTest(self.rays))
+                t_candidates.append(element.intersectTest(rays))
 
-            # Concatenate into one dense matrix: [N_rays, Total_Surfaces_In_Scene]
+            if not t_candidates:
+                return None
+
+            # [N_rays, Total_Surfaces_In_Scene]
             t_matrix = torch.cat(t_candidates, dim=1)
 
-            # Find the closest surface for each ray
-            # min_t: distance to closest hit
-            # global_hit_idx: index (0 to Total_Surfaces) of the hit
+            # Find closest hit
             min_t, global_hit_idx = torch.min(t_matrix, dim=1)
 
-            # Identify rays that actually hit something (t < inf)
-            hit_mask = (min_t < float('inf')) & (self.rays.intensity > 0)
+            # Geometric Hit Mask (t < inf)
+            hit_mask = min_t < float('inf')
 
-            # If no rays hit anything, we are done
             if not hit_mask.any():
-                return
+                return None
 
-            # Retrieve the specific Element ID and Internal Surface ID for the winners
-            # We use the pre-computed lookups.
+            # Retrieve ID mappings (assuming _build_index_maps was called)
             winner_element_ids = self.map_to_element[global_hit_idx]
             winner_surf_ids = self.map_to_surface[global_hit_idx]
 
-        # 2. PHYSICS PHASE (Differentiable)
-        # We calculate the next state for the rays.
-        # We initiate "accumulators" for the new ray states.
-        # We use zeros_like to ensure device/dtype compatibility.
+            return hit_mask, winner_element_ids, winner_surf_ids
 
+    def step(self):
+        """
+        Performs one physics bounce.
+        """
+        # 1. Reuse Centralized Ray Cast
+        result = self.ray_cast(self.rays)
+        if result is None: return
+
+        hit_mask, winner_element_ids, winner_surf_ids = result
+
+        # 2. Apply Physics Constraints
+        # For simulation, we only care about rays that hit AND have intensity
+        active_mask = hit_mask & (self.rays.intensity > 0)
+
+        if not active_mask.any():
+            return
+
+        # 3. Physics Phase (Differentiable)
         next_pos = torch.zeros_like(self.rays.pos)
         next_dir = torch.zeros_like(self.rays.dir)
         next_intensity = torch.zeros_like(self.rays.intensity)
 
-        unique_active_elements = torch.unique(winner_element_ids[hit_mask])
+        unique_active_elements = torch.unique(winner_element_ids[active_mask])
 
         for k_tensor in unique_active_elements:
-
-            k = k_tensor.item()  # Element Index
+            k = k_tensor.item()
             element = self.elements[k]
 
-            # Mask for all rays hitting Element K
-            # We intersect with hit_mask to ensure we don't include infinite misses
-            elem_mask = (winner_element_ids == k) & hit_mask
+            # Mask for active rays hitting Element K
+            elem_mask = (winner_element_ids == k) & active_mask
 
-            # OPTIMIZATION:
-            # Instead of passing a tensor of surf_ids to the element (which breaks),
-            # we find which specific surfaces of this element were hit.
-            # E.g., for a lens, did we hit Surface 0 (Front) or Surface 2 (Edge)?
-
-            # Extract the surface indices for hits on this element
+            # Extract surfaces hit on this element
             surfs_hit_on_this_element = winner_surf_ids[elem_mask]
             unique_surfs = torch.unique(surfs_hit_on_this_element)
 
             for j_tensor in unique_surfs:
-                j = j_tensor.item()  # Surface Index (Scalar)
-
-                # 2a. Precise Masking
-                # Rays hitting Element K AND Surface J
-                # This subset defines a group of rays undergoing the EXACT same physics/math.
+                j = j_tensor.item()
                 specific_mask = elem_mask & (winner_surf_ids == j)
 
-                # 2b. Gather Data
+                # Compute Physics
                 ray_subset = self.rays.subset(specific_mask)
-
-                # 2c. Compute Physics (Standard non-vectorized-index call)
-                # Now we pass 'j' as an int, which fits your Element.forward signature
                 out_pos, out_dir, out_intensity = element(ray_subset, j)
 
-                # 2d. Accumulate (Scatter)
-                # Place results back into the global tensors
+                # Accumulate
                 next_pos = next_pos.masked_scatter(specific_mask.unsqueeze(-1), out_pos)
                 next_dir = next_dir.masked_scatter(specific_mask.unsqueeze(-1), out_dir)
                 next_intensity = next_intensity.masked_scatter(specific_mask, out_intensity)
 
-            # --- 3. FINAL UPDATE ---
-            # Update the main Rays object with the aggregated results
-        self.rays.update(
-            mask=hit_mask,
-            new_pos=next_pos,
-            new_dir=next_dir,
-            new_intensity=next_intensity
-        )
+        self.rays.scatter_update(active_mask, next_pos, next_dir, next_intensity)
