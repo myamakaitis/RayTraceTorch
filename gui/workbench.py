@@ -5,43 +5,37 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QListWidget, QPushButton, QSplitter,
                              QTabWidget, QMessageBox, QLabel, QListWidgetItem)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from ..scene import Scene
 from ..rays.ray import Rays
 from ..elements import Element
 from ..render.camera import Renderer, Camera, OrbitCamera
 from .camera_pyqt import RenderWidget, ProfileWidget
 from .elementWindow import RecursiveElementDialog
+
 # ==========================================
-# 2. GENERIC MANAGER WIDGET (Elements & Bundles)
+# 3. GENERIC MANAGER WIDGET
 # ==========================================
 class ManagerWidget(QWidget):
-    """
-    A generic version of ElementManagerWindow that can handle
-    either Elements or Rays based on the `base_cls` passed to it.
-    """
-
     def __init__(self, title, base_cls, on_update_callback):
         super().__init__()
         self.base_cls = base_cls
         self.on_update_callback = on_update_callback
-        self.configs = []  # Stores dicts of {'config': {...}}
+        self.configs = []
 
-        # Layout
         layout = QVBoxLayout(self)
 
-        # List
         self.list_widget = QListWidget()
         self.list_widget.itemDoubleClicked.connect(self.edit_item)
         layout.addWidget(QLabel(f"Active {title}:"))
         layout.addWidget(self.list_widget)
 
-        # Buttons
         btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton("Add New")
+        self.add_btn = QPushButton("Add")
         self.add_btn.clicked.connect(self.add_item)
         self.edit_btn = QPushButton("Edit")
         self.edit_btn.clicked.connect(self.edit_item)
-        self.del_btn = QPushButton("Remove")
+        self.del_btn = QPushButton("Del")
         self.del_btn.clicked.connect(self.remove_item)
 
         btn_layout.addWidget(self.add_btn)
@@ -49,9 +43,8 @@ class ManagerWidget(QWidget):
         btn_layout.addWidget(self.del_btn)
         layout.addLayout(btn_layout)
 
-        # The "Push to Scene" button
-        self.build_btn = QPushButton(f"UPDATE SCENE ({title})")
-        self.build_btn.setStyleSheet("font-weight: bold; padding: 8px; background-color: #d0f0c0;")
+        self.build_btn = QPushButton(f"UPDATE SCENE")
+        self.build_btn.setStyleSheet("font-weight: bold; padding: 8px; background-color: #d0f0c0; color: black;")
         self.build_btn.clicked.connect(self.trigger_build)
         layout.addWidget(self.build_btn)
 
@@ -65,7 +58,6 @@ class ManagerWidget(QWidget):
             self.list_widget.addItem(list_item)
 
     def add_item(self):
-        # We reuse the powerful RecursiveElementDialog
         dlg = RecursiveElementDialog(self, element_base_cls=self.base_cls)
         dlg.setWindowTitle(f"Configure {self.base_cls.__name__}")
         if dlg.exec():
@@ -74,8 +66,6 @@ class ManagerWidget(QWidget):
                 config['name'] = f"{config['class']}_{len(self.configs)}"
             self.configs.append({'config': config})
             self.refresh_list()
-            # Optional: Auto-build on add?
-            # self.trigger_build()
 
     def edit_item(self):
         items = self.list_widget.selectedItems()
@@ -98,21 +88,14 @@ class ManagerWidget(QWidget):
         self.refresh_list()
 
     def trigger_build(self):
-        """
-        Instantiates objects from configs and sends them to the main window
-        via the callback.
-        """
         built_objects = []
         try:
             for item in self.configs:
-                # We use a dummy dialog just to access the instantiation logic
-                # logic is contained in the class, not the instance window really
                 dlg = RecursiveElementDialog(self, element_base_cls=self.base_cls)
                 dlg.set_configuration(item['config'])
                 obj = dlg.instantiate_current_state()
                 built_objects.append(obj)
 
-            # Fire callback with the list of new PyTorch objects
             self.on_update_callback(built_objects)
 
         except Exception as e:
@@ -122,40 +105,46 @@ class ManagerWidget(QWidget):
 
 
 # ==========================================
-# 3. UNIFIED WORKBENCH WINDOW
+# 4. UNIFIED WORKBENCH WINDOW (New Layout)
 # ==========================================
 class UnifiedWorkbench(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Optical Design Workbench")
-        self.resize(1400, 900)
+        self.resize(1600, 900)
 
-        # 1. Initialize Scene
+        # 1. Initialize Scene & Device
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Workbench Initialized on Device: {self.device}")
+
         self.scene = Scene()
+        self.scene.to(self.device)  # Initial move
 
         # 2. Setup Camera & Renderer
-        # (Assuming CUDA if available, else CPU)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.cam = OrbitCamera(
             pivot=(0, 0, 0),
             position=(0, 0, -60),
             look_at=(0, 0, 0),
             up_vector=(0, 1, 0),
             fov_deg=40, width=800, height=800,
-            device=device
+            device=self.device
         )
-        self.renderer = Renderer(self.scene, background_color=(0.1, 0.1, 0.15))
+        self.renderer = Renderer(self.scene, background_color=(0.8, 0.8, 0.8))
 
-        # 3. Main Layout
+        # 3. Main Layout Construction
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
 
-        # --- LEFT PANEL (Managers) ---
+        # We use a Splitter for resizable columns
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.main_splitter)
+
+        # --- COL 1: MANAGERS (Left) ---
         self.tabs = QTabWidget()
-        self.tabs.setFixedWidth(350)
+        self.tabs.setMinimumWidth(300)
 
-        # Element Manager
         self.element_manager = ManagerWidget(
             title="Optical Elements",
             base_cls=Element,
@@ -163,7 +152,6 @@ class UnifiedWorkbench(QMainWindow):
         )
         self.tabs.addTab(self.element_manager, "Elements")
 
-        # Bundle Manager (Requested Feature)
         self.bundle_manager = ManagerWidget(
             title="Ray Bundles",
             base_cls=Rays,
@@ -171,69 +159,94 @@ class UnifiedWorkbench(QMainWindow):
         )
         self.tabs.addTab(self.bundle_manager, "Rays")
 
-        main_layout.addWidget(self.tabs)
+        self.main_splitter.addWidget(self.tabs)
 
-        # --- RIGHT PANEL (Visualizer) ---
-        self.viz_splitter = QSplitter(Qt.Orientation.Vertical)
+        # --- COL 2: 3D RENDER (Center) ---
+        self.render_container = QWidget()
+        rc_layout = QVBoxLayout(self.render_container)
+        rc_layout.setContentsMargins(0, 0, 0, 0)
+        rc_layout.addWidget(QLabel("<b>3D Interactive View</b>"))
 
-        # 3D View
         self.render_widget = RenderWidget(self.renderer, self.cam)
-        self.viz_splitter.addWidget(self.render_widget)
+        rc_layout.addWidget(self.render_widget)
 
-        # Profile View (Bottom)
-        self.profile_widget = ProfileWidget(self.renderer, self.scene)
-        self.viz_splitter.addWidget(self.profile_widget)
-        self.viz_splitter.setStretchFactor(0, 4)
-        self.viz_splitter.setStretchFactor(1, 1)
+        self.main_splitter.addWidget(self.render_container)
 
-        main_layout.addWidget(self.viz_splitter)
+        # --- COL 3: CROSS SECTIONS (Right) ---
+        self.profiles_container = QWidget()
+        pc_layout = QVBoxLayout(self.profiles_container)
+        pc_layout.setContentsMargins(0, 0, 0, 0)
+        pc_layout.setSpacing(10)
 
+        # XZ View (Top)
+        self.profile_xz = ProfileWidget(self.renderer, self.scene, axis='x')
+        pc_layout.addWidget(self.profile_xz)
+
+        # YZ View (Bottom)
+        self.profile_yz = ProfileWidget(self.renderer, self.scene, axis='y')
+        pc_layout.addWidget(self.profile_yz)
+
+        self.main_splitter.addWidget(self.profiles_container)
+
+        # Set Stretch Factors to ensure visibility
+        # Manager : 3D View : Profiles
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 4)
+        self.main_splitter.setStretchFactor(2, 2)
     # --- Callbacks ---
 
     def update_scene_elements(self, new_elements):
-        """Called when 'UPDATE SCENE' is clicked in the Elements tab."""
-        print(f"Updating Scene with {len(new_elements)} elements...")
+        print(f"Updating Scene with {len(new_elements)} elements on {self.device}...")
 
-        # Clear and Replace
         self.scene.clear_elements()
         self.scene.elements.extend(nn.ModuleList(new_elements))
 
-        # Move to device
-        device = self.cam.device
-        self.scene.to(device)
+        # CRITICAL: Move scene to GPU *before* rebuilding maps
+        self.scene.to(self.device)
 
-        # Refresh Views
+        # Rebuild maps (now that elements are on GPU, maps will be created on GPU)
+        self.scene._build_index_maps()
+
         self.refresh_all_views()
 
     def update_scene_rays(self, new_bundles):
-        """Called when 'UPDATE SCENE' is clicked in the Rays tab."""
         print(f"Updating Scene with {len(new_bundles)} ray bundles...")
 
         self.scene.clear_rays()
-        self.scene.rays.extend(nn.ModuleList(new_bundles))
+        if len(new_bundles) > 0:
+            # Assuming single bundle for now
+            self.scene.rays = new_bundles[0]
 
-        device = self.cam.device
-        self.scene.to(device)
+            # Ensure rays are on correct device
+            if hasattr(self.scene.rays, 'to'):
+                self.scene.rays = self.scene.rays.to(self.device)
+
+        # Scene is already on device, but ensure consistency
+        self.scene.to(self.device)
 
         self.refresh_all_views()
 
     def refresh_all_views(self):
         """Forces a repaint of 3D and Profile widgets."""
         self.render_widget.refresh_render()
-        self.profile_widget.update_data()
+        self.profile_xz.update_data()
+        self.profile_yz.update_data()
 
 
-# ==========================================
-# 4. ENTRY POINT
-# ==========================================
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    # Dark Mode Styling for Professional Feel
     app.setStyle("Fusion")
     palette = app.palette()
-    palette.setColor(palette.ColorRole.Window, Qt.GlobalColor.black)
+    palette.setColor(palette.ColorRole.Window, QColor(30, 30, 30))
     palette.setColor(palette.ColorRole.WindowText, Qt.GlobalColor.white)
+    palette.setColor(palette.ColorRole.Base, QColor(15, 15, 15))
+    palette.setColor(palette.ColorRole.AlternateBase, QColor(45, 45, 45))
+    palette.setColor(palette.ColorRole.Button, QColor(45, 45, 45))
+    palette.setColor(palette.ColorRole.ButtonText, Qt.GlobalColor.white)
+    palette.setColor(palette.ColorRole.BrightText, Qt.GlobalColor.red)
+    palette.setColor(palette.ColorRole.Highlight, QColor(100, 100, 225))
+    palette.setColor(palette.ColorRole.HighlightedText, Qt.GlobalColor.black)
     app.setPalette(palette)
 
     window = UnifiedWorkbench()

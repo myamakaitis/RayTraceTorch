@@ -140,9 +140,6 @@ class Plane(Surface):
 class Sphere(Surface):
     """
     A sphere centered at (0,0,0) in Local Space.
-    Radius is defined by curvature (c = 1/R).
-    Using curvature avoids infinity issues for flat surfaces (R=inf),
-    though for a pure Sphere class, R is often more intuitive.
     Here we stick to Radius R as a parameter for explicit Spheres.
     """
     def __init__(self, radius : float, radius_grad: bool = False, transform: RayTransform = None):
@@ -244,9 +241,6 @@ class Quadric(Surface):
     Aligned with the optical axis Z.
 
     Equation:
-    z = (c * r^2) / (1 + sqrt(1 - (1+k) * c^2 * r^2))
-
-    Implicit form for Intersection:
     c(x^2 + y^2) + c(1+k)z^2 - 2z = 0
 
     Parameters:

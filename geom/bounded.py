@@ -51,8 +51,8 @@ class Disk(Plane, SurfaceBounded):
     Circular aperture defined by a radius.
     """
 
-    def __init__(self, radius: float, transform: RayTransform = None):
-        super().__init__(transform=transform)
+    def __init__(self, radius: float, invert: bool =False, transform: RayTransform = None):
+        super().__init__(transform=transform, invert=invert)
         self.radius = nn.Parameter(torch.as_tensor(radius), requires_grad=False)
 
     def inBounds(self, local_pos):
@@ -67,8 +67,8 @@ class Rectangle(Plane, SurfaceBounded):
     Rectangular aperture defined by half-widths in X and Y.
     """
 
-    def __init__(self, half_x: float, half_y: float, transform: RayTransform = None):
-        super().__init__(transform=transform)
+    def __init__(self, half_x: float, half_y: float, invert: bool = False, transform: RayTransform = None):
+        super().__init__(transform=transform, invert=invert)
         self.hx = nn.Parameter(torch.as_tensor(half_x, dtype=torch.float32))
         self.hy = nn.Parameter(torch.as_tensor(half_y, dtype=torch.float32))
 
@@ -87,8 +87,8 @@ class Ellipse(Plane, SurfaceBounded):
 
     def __init__(self, r_major : float, r_minor: float, rot: float,
                        r_major_grad:bool = False, r_minor_grad:bool = False, rot_grad: bool = False,
-                 transform: RayTransform = None):
-        super().__init__(transform=transform)
+                 invert: bool = False, transform: RayTransform = None):
+        super().__init__(transform=transform, invert=invert)
         self.r_minor = nn.Parameter(torch.as_tensor(r_minor), requires_grad=r_minor_grad)
         self.r_major = nn.Parameter(torch.as_tensor(r_major), requires_grad=r_major_grad)
         self.rot = nn.Parameter(torch.as_tensor(rot), requires_grad=rot_grad)

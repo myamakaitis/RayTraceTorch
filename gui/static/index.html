@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ray Workbench Web</title>
+    <style>
+        /* === RESET & LAYOUT === */
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #ddd; height: 100vh; display: flex; overflow: hidden; }
+
+        /* === COLUMNS === */
+        #left-panel { width: 300px; background: #252526; border-right: 1px solid #333; display: flex; flex-direction: column; }
+        #center-panel { flex-grow: 1; position: relative; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        #right-panel { width: 300px; background: #252526; border-left: 1px solid #333; display: flex; flex-direction: column; padding: 10px; box-sizing: border-box; }
+
+        /* === WIDGETS === */
+        h3 { margin: 10px 0; font-size: 14px; text-transform: uppercase; color: #888; border-bottom: 1px solid #444; padding-bottom: 5px; }
+
+        /* List Widget */
+        #element-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex-grow: 1; }
+        #element-list li { padding: 8px 12px; border-bottom: 1px solid #333; cursor: pointer; display: flex; justify-content: space-between; }
+        #element-list li:hover { background: #333; }
+        #element-list li span.del { color: #f44; font-weight: bold; cursor: pointer; }
+
+        /* Buttons */
+        .btn { background: #0e639c; color: white; border: none; padding: 8px; width: 100%; cursor: pointer; text-align: center; }
+        .btn:hover { background: #1177bb; }
+        .btn-green { background: #388a34; margin-top: 10px; }
+
+        /* Render View */
+        #render-img { max-width: 100%; max-height: 100%; box-shadow: 0 0 20px #000; cursor: grab; }
+        #render-img:active { cursor: grabbing; }
+
+        /* Profiles */
+        .profile-canvas { background: #111; border: 1px solid #444; width: 100%; height: 200px; margin-bottom: 10px; }
+
+        /* === MODAL (The Recursive Form) === */
+        #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
+        #modal { background: #252526; width: 500px; max-height: 90%; border: 1px solid #444; display: flex; flex-direction: column; box-shadow: 0 0 30px #000; }
+        #modal-header { padding: 15px; background: #333; font-weight: bold; display: flex; justify-content: space-between; }
+        #modal-body { padding: 20px; overflow-y: auto; }
+        #modal-footer { padding: 15px; border-top: 1px solid #333; display: flex; justify-content: flex-end; gap: 10px; }
+
+        /* Form Inputs */
+        .form-group { margin-bottom: 10px; }
+        .form-label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
+        .form-input { width: 100%; background: #3c3c3c; border: 1px solid #555; color: white; padding: 5px; box-sizing: border-box; }
+        .vec3-container { display: flex; gap: 5px; }
+        fieldset { border: 1px solid #444; margin-top: 10px; padding: 10px; }
+        legend { color: #aaa; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+<div id="left-panel">
+    <div style(padding: 10px)>
+        <h3>Scene Elements</h3>
+    </div>
+    <ul id="element-list">
+        </ul>
+    <div style="padding: 10px;">
+        <button class="btn" onclick="openAddModal()">+ Add Element</button>
+    </div>
+</div>
+
+<div id="center-panel">
+    <img id="render-img" src="/api/render" draggable="false">
+    <div style="position: absolute; bottom: 10px; left: 10px; color: #555; font-size: 12px;">
+        Left Drag: Rotate | Right Drag: Pan | Scroll: Zoom
+    </div>
+</div>
+
+<div id="right-panel">
+    <h3>XZ Profile (Top)</h3>
+    <canvas id="canvas-xz" class="profile-canvas" width="280" height="200"></canvas>
+
+    <h3>YZ Profile (Side)</h3>
+    <canvas id="canvas-yz" class="profile-canvas" width="280" height="200"></canvas>
+</div>
+
+<div id="modal-overlay">
+    <div id="modal">
+        <div id="modal-header">
+            <span id="modal-title">Add Element</span>
+            <span style="cursor:pointer" onclick="closeModal()">✕</span>
+        </div>
+        <div id="modal-body">
+            <div class="form-group">
+                <label class="form-label">Class Type</label>
+                <select id="class-selector" class="form-input" onchange="loadClassSchema()"></select>
+            </div>
+            <div id="dynamic-form"></div>
+        </div>
+        <div id="modal-footer">
+            <button class="btn" style="background:#444" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-green" onclick="submitElement()">Create</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // === GLOBAL STATE ===
+    const renderImg = document.getElementById('render-img');
+    let isBusy = false;
+
+    // === 1. CAMERA INTERACTION ===
+    let isDragging = false;
+    let lastX=0, lastY=0;
+
+    renderImg.addEventListener('mousedown', e => {
+        isDragging = true; lastX = e.clientX; lastY = e.clientY;
+    });
+
+    window.addEventListener('mouseup', () => isDragging = false);
+
+    window.addEventListener('mousemove', async e => {
+        if(!isDragging || isBusy) return;
+
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        if(dx === 0 && dy === 0) return;
+
+        isBusy = true;
+        const endpoint = (e.buttons === 2) ? '/api/camera/pan' : '/api/camera/orbit';
+
+        try {
+            await fetch(endpoint, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({dx, dy})
+            });
+            lastX = e.clientX; lastY = e.clientY;
+            refreshAll();
+        } finally {
+            isBusy = false;
+        }
+    });
+
+    renderImg.addEventListener('wheel', async e => {
+        if(isBusy) return;
+        isBusy = true;
+        try {
+            await fetch('/api/camera/zoom', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({dx: e.deltaY}) // reusing dx field
+            });
+            refreshAll();
+        } finally {
+            isBusy = false;
+        }
+    }, {passive: false});
+
+    window.addEventListener('contextmenu', e => e.preventDefault());
+
+
+    // === 2. RENDERING & PROFILES ===
+    async function refreshAll() {
+        // Refresh 3D Image
+        const t = new Date().getTime();
+        const blob = await (await fetch(`/api/render?t=${t}`)).blob();
+        renderImg.src = URL.createObjectURL(blob);
+
+        // Refresh Profiles
+        const profiles = await (await fetch('/api/profiles')).json();
+        drawProfile('canvas-xz', profiles.xz);
+        drawProfile('canvas-yz', profiles.yz);
+
+        // Refresh List
+        loadElementList();
+    }
+
+    function drawProfile(canvasId, paths) {
+        const cvs = document.getElementById(canvasId);
+        const ctx = cvs.getContext('2d');
+        const w = cvs.width, h = cvs.height;
+        ctx.clearRect(0, 0, w, h);
+
+        // Simple Axes
+        ctx.strokeStyle = '#333';
+        ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(w/2, 0); ctx.lineTo(w/2, h); ctx.stroke();
+
+        // Scale factor (Simple auto-scale or fixed)
+        const scale = 5.0;
+        const cx = w/2, cy = h/2;
+
+        paths.forEach(path => {
+            ctx.strokeStyle = '#00aaff';
+            ctx.beginPath();
+            for(let i=0; i<path.z.length; i++) {
+                // Map Z -> X (horizontal), H -> Y (vertical)
+                const x = cx + path.z[i] * scale;
+                const y = cy - path.h[i] * scale;
+                if(i===0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        });
+    }
+
+    // === 3. ELEMENT MANAGER ===
+    async function loadElementList() {
+        const list = document.getElementById('element-list');
+        list.innerHTML = '';
+        const data = await (await fetch('/api/elements')).json();
+
+        data.forEach(el => {
+            const li = document.createElement('li');
+            li.innerHTML = `<span>${el.name}</span> <span class="del" onclick="delElement(${el.id})">×</span>`;
+            list.appendChild(li);
+        });
+    }
+
+    async function delElement(id) {
+        await fetch(`/api/elements/${id}`, {method: 'DELETE'});
+        refreshAll();
+    }
+
+    // === 4. DYNAMIC FORM BUILDER (The Recursive Magic) ===
+    async function openAddModal() {
+        document.getElementById('modal-overlay').style.display = 'flex';
+        // Load classes
+        const classes = await (await fetch('/api/classes')).json();
+        const sel = document.getElementById('class-selector');
+        sel.innerHTML = '<option value="">-- Select Class --</option>';
+        classes.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c; opt.innerText = c;
+            sel.appendChild(opt);
+        });
+    }
+
+    function closeModal() {
+        document.getElementById('modal-overlay').style.display = 'none';
+        document.getElementById('dynamic-form').innerHTML = '';
+    }
+
+    async function loadClassSchema() {
+        const clsName = document.getElementById('class-selector').value;
+        if(!clsName) return;
+        const schema = await (await fetch(`/api/schema/${clsName}`)).json();
+        const container = document.getElementById('dynamic-form');
+        container.innerHTML = '';
+        buildFormRecursive(schema.params, container, 'params');
+    }
+
+    function buildFormRecursive(params, container, prefix) {
+        params.forEach(p => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-group';
+
+            const label = document.createElement('label');
+            label.className = 'form-label';
+            label.innerText = p.name;
+            wrapper.appendChild(label);
+
+            const inputName = `${prefix}.${p.name}`;
+
+            if(p.type === 'float' || p.type === 'int') {
+                const input = document.createElement('input');
+                input.className = 'form-input';
+                input.type = 'number';
+                input.step = p.type === 'float' ? '0.01' : '1';
+                input.value = p.default || 0;
+                input.dataset.key = p.name;
+                input.dataset.type = p.type;
+                wrapper.appendChild(input);
+            }
+            else if (p.type === 'VEC3') {
+                const row = document.createElement('div');
+                row.className = 'vec3-container';
+                const def = p.default || [0,0,0];
+                ['x','y','z'].forEach((axis, i) => {
+                    const inp = document.createElement('input');
+                    inp.className = 'form-input';
+                    inp.type = 'number';
+                    inp.step = '0.1';
+                    inp.value = def[i] || 0;
+                    inp.dataset.vecIndex = i;
+                    row.appendChild(inp);
+                });
+                // We store metadata on the row
+                row.dataset.key = p.name;
+                row.dataset.type = 'VEC3';
+                wrapper.appendChild(row);
+            }
+            else {
+                // Fallback for strings or complex logic not fully implemented
+                const input = document.createElement('input');
+                input.className = 'form-input';
+                input.value = p.default || '';
+                input.dataset.key = p.name;
+                wrapper.appendChild(input);
+            }
+
+            container.appendChild(wrapper);
+        });
+    }
+
+    async function submitElement() {
+        const clsName = document.getElementById('class-selector').value;
+        const container = document.getElementById('dynamic-form');
+
+        // Harvester function to extract data from DOM
+        function harvest(parent) {
+            const data = {};
+            // Inputs
+            parent.querySelectorAll(':scope > .form-group > .form-input').forEach(inp => {
+                let val = inp.value;
+                if(inp.dataset.type === 'float') val = parseFloat(val);
+                if(inp.dataset.type === 'int') val = parseInt(val);
+                data[inp.dataset.key] = val;
+            });
+            // Vectors
+            parent.querySelectorAll(':scope > .form-group > .vec3-container').forEach(row => {
+                const vec = [0,0,0];
+                row.querySelectorAll('input').forEach(inp => {
+                    vec[parseInt(inp.dataset.vecIndex)] = parseFloat(inp.value);
+                });
+                data[row.dataset.key] = vec;
+            });
+            return data;
+        }
+
+        const params = harvest(container);
+        const payload = { class: clsName, params: params };
+
+        await fetch('/api/elements/add', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        closeModal();
+        refreshAll();
+    }
+
+    // Initial Load
+    refreshAll();
+
+</script>
+</body>
+</html>

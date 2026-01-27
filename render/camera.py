@@ -260,11 +260,12 @@ class Renderer:
         elif is_type(phys_func, 'Block'):
             base_color[:] = torch.tensor([0.2, 0.2, 0.2], device=normals.device)
         elif is_type(phys_func, 'Transmit'):
-            base_color[:] = torch.tensor([0.0, 1.0, 0.0], device=normals.device)
-        elif is_type(phys_func, 'Refract'):
+            base_color[:] = torch.tensor([0.0, 0.8, 0.2], device=normals.device)
+        elif is_type(phys_func, 'RefractSnell') or is_type(phys_func, 'RefractFresnel'):
             # Index gradient logic
-            n_val = getattr(phys_func, 'n2', 1.5)
-            if isinstance(n_val, torch.Tensor): n_val = n_val.item()
+            n_val1, n_val2 = getattr(phys_func, 'ior_in', 1.5).item(), getattr(phys_func, 'ior_out', 1.5).item()
+
+            n_val = max(n_val1, n_val2)
 
             c_white = torch.tensor([0.9, 0.9, 0.9], device=normals.device)
             c_cyan = torch.tensor([0.0, 1.0, 1.0], device=normals.device)
@@ -305,28 +306,14 @@ class Renderer:
         return base_color * shading
 
     def scan_profile(self, target_element, axis='x', num_points=200, bounds=None):
-        """
-        Generates 2D cross-section data for a specific element.
-
-        Args:
-            target_element: The Element object to scan.
-            axis: 'x' (XZ plane) or 'y' (YZ plane).
-            bounds: Tuple (min, max) for the scan width. If None, inferred.
-
-        Returns:
-            List of dictionaries [{'h': [...], 'z': [...], 'surf_idx': int}, ...]
-        """
-        device = target_element.shape.transform.trans.device  # Heuristic to find device
+        """Generates 2D cross-section data for a specific element."""
+        device = target_element.shape.transform.trans.device
 
         # 1. Determine Scan Extent
         if bounds:
             extent = bounds[1] - bounds[0]
             center = (bounds[0] + bounds[1]) / 2
         else:
-            # Fallback heuristic
-            width = 10.0
-            # If shape has radius, use it
-            # This depends on specific Shape impl.
             width = getattr(target_element.shape, 'radius', torch.tensor(10.0)).item() * 2.2
             center = 0.0
             extent = width
@@ -334,40 +321,30 @@ class Renderer:
         # 2. Create Rays
         coords = torch.linspace(center - extent / 2, center + extent / 2, num_points, device=device)
         zeros = torch.zeros_like(coords)
-        z_start = torch.full_like(coords, -100.0)  # Start far back
+        z_start = torch.full_like(coords, -100.0)
 
         if axis == 'x':
-            # Vary X, Y=0, Z=-100, Dir=+Z
             origins = torch.stack([coords, zeros, z_start], dim=1)
         else:
-            # Vary Y, X=0
             origins = torch.stack([zeros, coords, z_start], dim=1)
 
         directions = torch.tensor([0.0, 0.0, 1.0], device=device).expand(num_points, 3)
-
         rays = Rays.initialize(origins, directions, device=device)
 
-        # 3. Intersect
-        # We call intersectTest directly on the element
+        # 3. Intersect (Direct call to element is preferred for isolated profiling)
         with torch.no_grad():
             t_matrix = target_element.intersectTest(rays)
 
-        # 4. Extract Profiles per Surface
+        # 4. Extract Profiles
         results = []
         num_surfaces = t_matrix.shape[1]
 
         for i in range(num_surfaces):
             t = t_matrix[:, i]
             mask = t < float('inf')
-
             if mask.any():
-                # Recover global Z: z = origin_z + t (since dir_z=1)
                 z_vals = (-100.0 + t[mask]).cpu().numpy()
                 h_vals = coords[mask].cpu().numpy()
-                results.append({
-                    'surf_idx': i,
-                    'h': h_vals,
-                    'z': z_vals
-                })
+                results.append({'surf_idx': i, 'h': h_vals, 'z': z_vals})
 
         return results

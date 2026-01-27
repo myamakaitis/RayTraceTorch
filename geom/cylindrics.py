@@ -25,17 +25,18 @@ class Cylindric(Shape):
         """
         x, y, z = local_pos[:, 0], local_pos[:, 1], local_pos[:, 2]
 
+
+        x_max = self.surfaces[2].transform.trans[0]
+        x_min = self.surfaces[3].transform.trans[0]
+        y_max = self.surfaces[4].transform.trans[1]
+        y_min = self.surfaces[5].transform.trans[1]
+
+        in_aperture = (x <= x_max + 1e-5) & (x >= x_min - 1e-5) & \
+                      (y <= y_max + 1e-5) & (y >= y_min - 1e-5)
+        # Check aperture
+        # Hit on Optical Face: Must be within XY Aperture
+
         if surf_idx < self.N_optical:
-
-            x_max = self.surfaces[2].transform.trans[0]
-            x_min = self.surfaces[3].transform.trans[0]
-            y_max = self.surfaces[4].transform.trans[1]
-            y_min = self.surfaces[5].transform.trans[1]
-
-            in_aperture = (x <= x_max + 1e-5) & (x >= x_min - 1e-5) & \
-                          (y <= y_max + 1e-5) & (y >= y_min - 1e-5)
-            # Check aperture
-            # Hit on Optical Face: Must be within XY Aperture
             return in_aperture
 
         else:
@@ -45,11 +46,11 @@ class Cylindric(Shape):
 
             # Ensure z_front is the 'left-most' in local coordinates if T/2 logic holds
             # But generally z_front < z_back
-            in_z = (z >= z_front - 1e-4) & (z <= z_back + 1e-4)
+            in_z = (z >= z_front + 1e-4) & (z <= z_back - 1e-4)
             # Hit on Edge (Right/Left/Top/Bottom)
             # Must be within Z-bounds of the lens (between faces)
 
-            return in_z
+            return in_z & in_aperture
 
 
 class CylSinglet(Cylindric):

@@ -131,25 +131,35 @@ class RenderWidget(QLabel):
 
 
 class ProfileWidget(QWidget):
-    def __init__(self, renderer, scene):
-        super().__init__()
+    def __init__(self, renderer, scene, axis='x', parent=None):
+        super().__init__(parent)
         self.renderer = renderer
         self.scene = scene
+        self.axis = axis  # 'x' (XZ plane) or 'y' (YZ plane)
         self.profiles = []
-        self.setMinimumWidth(200)
-        self.setStyleSheet("background-color: #222;")
+
+        # Ensure the widget has a minimum size so it doesn't collapse in the layout
+        self.setMinimumHeight(250)
+        self.setMinimumWidth(250)
+        self.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333;")
 
     def update_data(self):
         self.profiles = []
-        # Wrap in try-except to prevent startup crashes if physics fails
+        # Guard against missing scene/elements
+        if not self.scene or not hasattr(self.scene, 'elements'):
+            return
+
         try:
             for el in self.scene.elements:
+                # Ensure the renderer has the scanning method
                 if hasattr(self.renderer, 'scan_profile'):
-                    scan_data = self.renderer.scan_profile(el, axis='x', num_points=200)
+                    # scan_profile returns a list of dicts: [{'h': np.array, 'z': np.array, ...}]
+                    # We assume these arrays are already on CPU/Numpy via the Renderer implementation
+                    scan_data = self.renderer.scan_profile(el, axis=self.axis, num_points=200)
                     self.profiles.extend(scan_data)
-            self.update()
+            self.update()  # Trigger paintEvent
         except Exception as e:
-            print(f"Profile Scan Error: {e}")
+            print(f"Profile Scan Error ({self.axis}): {e}")
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -157,37 +167,49 @@ class ProfileWidget(QWidget):
 
         w, h = self.width(), self.height()
         cx, cy = w // 2, h // 2
+
+        # Scale: Pixels per Unit (Adjust this if your elements are very small/large)
         scale = 10.0
 
-        painter.setPen(QColor(50, 50, 50))
-        painter.drawLine(0, cy, w, cy)
-        painter.drawLine(cx, 0, cx, h)
+        # 1. Draw Axis Lines
+        painter.setPen(QColor(60, 60, 60))
+        painter.drawLine(0, cy, w, cy)  # Optical Axis (Z)
+        painter.drawLine(cx, 0, cx, h)  # Transverse Axis (X or Y)
 
+        # 2. Draw Labels
+        painter.setPen(QColor(180, 180, 180))
+        label = "Top View (XZ)" if self.axis == 'x' else "Side View (YZ)"
+        painter.drawText(10, 20, label)
+
+        # 3. Draw Profiles
         for surf in self.profiles:
-            # Safe Color Generation
+            # Generate a consistent color based on surface index
             hue = int((surf['surf_idx'] * 50) % 255)
             painter.setPen(QColor.fromHsv(hue, 200, 255))
 
-            h_vals = surf['h']
-            z_vals = surf['z']
+            h_vals = surf['h']  # Transverse position
+            z_vals = surf['z']  # Optical axis position
 
+            # We iterate using standard python range to avoid tensor issues
             for i in range(len(h_vals)):
-                # Coordinate Clamping to prevent drawing at Infinity (Crash Risk)
                 try:
-                    raw_x = z_vals[i]
-                    raw_y = h_vals[i]
+                    raw_z = z_vals[i]
+                    raw_h = h_vals[i]
 
-                    # Skip NaNs or Infs
-                    if not (np.isfinite(raw_x) and np.isfinite(raw_y)):
+                    # Robust Finite Check (using numpy, matching working standalone)
+                    if not (np.isfinite(raw_z) and np.isfinite(raw_h)):
                         continue
 
-                    sx = int(cx + raw_x * scale)
-                    sy = int(cy - raw_y * scale)
+                    # Mapping:
+                    # Z -> Screen X (Horizontal)
+                    # H -> Screen Y (Vertical)
+                    sx = int(cx + raw_z * scale)
+                    sy = int(cy - raw_h * scale)
 
-                    # Draw only if within reasonable bounds (Qt crashes on extreme coords)
+                    # Simple bounds check to prevent Qt rendering artifacts
                     if -5000 < sx < 5000 and -5000 < sy < 5000:
                         painter.drawPoint(sx, sy)
-                except ValueError:
+                except Exception:
                     continue
 
 
