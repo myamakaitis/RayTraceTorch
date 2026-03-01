@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from tensordict import tensorclass
-from typing import Optional
+from typing import Optional, Union
 
 
 @tensorclass

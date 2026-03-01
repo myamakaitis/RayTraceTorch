@@ -1,11 +1,14 @@
 import torch
 import torch.nn as nn
+from typing import Optional, Union
 
 from geom import RayTransform
 from .parent import Element
 from ..phys import RefractSnell, RefractFresnel, Block
 from ..geom import Singlet, CylSinglet, Doublet, Triplet
 from .ideal import ParaxialRefractMat
+
+
 
 class SingletLens(Element):
 
@@ -18,7 +21,7 @@ class SingletLens(Element):
                  ior_glass_grad: bool = False, ior_media_grad: bool = False,
 
                  fresnel: bool = False, inked: bool =False,
-                 transform: RayTransform=None):
+                 transform:  Optional[Union[RayTransform, None]]=None):
 
         super().__init__()
 
@@ -186,7 +189,7 @@ class CylSingletLens(SingletLens):
                  c1_grad = False, c2_grad = False,
                  t_grad = False, height_grad = False, width_grad = False,
                  ior_glass_grad = False, ior_media_grad = False,
-                 fresnel = False, inked=False, transform: RayTransform=None):
+                 fresnel = False, inked=False, transform:  Optional[Union[RayTransform, None]]=None):
 
         super().__init__(c1, c2, height, t,
                  ior_glass, ior_media = ior_media,
@@ -232,7 +235,7 @@ class DoubletLens(Element):
                  c1_grad=False, c2_grad=False, c3_grad=False,
                  t1_grad=False, t2_grad=False, d_grad=False,
                  ior_glass1_grad=False, ior_glass2_grad=False, ior_media_grad=False,
-                 fresnel=False, inked=True, transform: RayTransform=None):
+                 fresnel=False, inked=True, transform:  Optional[Union[RayTransform, None]]=None):
 
         super().__init__()
 
@@ -327,7 +330,7 @@ class TripletLens(Element):
                  t1_grad=False, t2_grad=False, t3_grad=False, d_grad=False,
                  ior_glass1_grad=False, ior_glass2_grad=False,
                  ior_glass3_grad=False, ior_media_grad=False,
-                 fresnel=False, inked=True, transform: RayTransform=None):
+                 fresnel=False, inked=True, transform:  Optional[Union[RayTransform, None]]=None):
 
         super().__init__()
 

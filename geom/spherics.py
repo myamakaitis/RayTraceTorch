@@ -5,6 +5,7 @@ from .shape import Shape
 from .primitives import Cylinder, Plane
 from .bounded import HalfSphere
 from .transform import RayTransform
+from typing import Optional, Union
 
 class Spheric(Shape):
     """
@@ -71,7 +72,7 @@ class Singlet(Spheric):
                  D: float, T: float,
                  C1_grad: bool = True, C2_grad: bool = True,
                  D_grad: bool = False, T_grad: bool = True,
-                 transform: RayTransform = None):
+                 transform: Optional[Union[RayTransform, None]] = None):
         """
         Args:
             C1 (Tensor): curvature of front surface (Inf for Plane).
@@ -125,7 +126,7 @@ class Doublet(Spheric):
                  C1_grad: bool=True, C2_grad: bool=True, C3_grad: bool=True,
                  D_grad: bool=False,
                  T1_grad: bool=True, T2_grad: bool=True,
-                 transform: RayTransform=None):
+                 transform: Optional[Union[RayTransform, None]] =None):
         """
         Args:
             C1, C2, C3: Curvatures of the 3 surfaces (Front, Middle, Back).
@@ -218,7 +219,7 @@ class Triplet(Spheric):
                  C1_grad: bool=True, C2_grad: bool=True, C3_grad: bool=True, C4_grad: bool=True,
                  D_grad: bool=False,
                  T1_grad: bool=True, T2_grad: bool=True, T3_grad: bool=True,
-                 transform: RayTransform=None):
+                 transform: Optional[Union[RayTransform, None]]=None):
         """
         Args:
             C1..C4: Curvatures of the 4 surfaces.

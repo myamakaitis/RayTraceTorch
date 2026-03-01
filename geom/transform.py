@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, Union, List, Tuple
 from torch.distributions import Normal
 
-Vector3 = Union[torch.Tensor, List[float], Tuple[float, ...]]
-Bool3 = Union[torch.Tensor, List[bool], Tuple[bool, ...]]
+Vector3 = Optional[Union[torch.Tensor, List[float], Tuple[float, ...]]]
+Bool3 = Optional[Union[torch.Tensor, List[bool], Tuple[bool, ...]]]
 
 class RayTransform(nn.Module):
 
@@ -150,8 +150,8 @@ class RayTransformNoisy(RayTransform):
                          trans_grad = trans_grad, trans_mask = trans_mask,
                          rot_grad = rot_grad, rot_mask=rot_mask)
 
-        self.cached_trans_noise = None
-        self.cached_rot_noise = None
+        self.cached_trans_noise = torch.Tensor()
+        self.cached_rot_noise = torch.Tensor()
 
         self.zero = torch.nn.Parameter(torch.zeros(3, dtype=dtype), requires_grad = False)
 
@@ -175,8 +175,8 @@ class RayTransformNoisy(RayTransform):
 
     def addNoise(self, N):
 
-        trans_noise = self.trans[:, None] + self.trans_dist.sample((N, ))
-        rot_noise = self.rot_dist[:, None] + self.rot_dist.sample((N, ))
+        trans_noise = self.trans[:, None] + self.trans_dist.sample(N)
+        rot_noise = self.rot_vec[:, None] + self.rot_dist.sample(N)
 
         return trans_noise, rot_noise
 

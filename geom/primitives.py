@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from .transform import RayTransform
+from typing import Optional, Union
 
 intersectEpsilon = 1e-6
 
@@ -13,7 +14,7 @@ class Surface(nn.Module):
     2. intersect: Detailed, differentiable, returns t, hit_point, and global_normal.
     """
 
-    def __init__(self, transform : RayTransform = None):
+    def __init__(self, transform : Optional[Union[RayTransform, None]] = None):
 
         super().__init__()
 
@@ -142,7 +143,7 @@ class Sphere(Surface):
     A sphere centered at (0,0,0) in Local Space.
     Here we stick to Radius R as a parameter for explicit Spheres.
     """
-    def __init__(self, radius : float, radius_grad: bool = False, transform: RayTransform = None):
+    def __init__(self, radius : float, radius_grad: bool = False, transform: Optional[Union[RayTransform, None]] = None):
         super().__init__(transform=transform)
         self.radius = torch.nn.Parameter(torch.tensor(radius), requires_grad=radius_grad)
 
@@ -187,7 +188,7 @@ class Cylinder(Surface):
     Equation: x^2 + y^2 = R^2
     """
 
-    def __init__(self, radius : float, transform: RayTransform = None,
+    def __init__(self, radius : float, transform: Optional[Union[RayTransform, None]] = None,
                  radius_grad : bool = False):
         super().__init__(transform)
         self.radius = nn.Parameter(torch.tensor(radius), requires_grad=radius_grad)
@@ -249,7 +250,7 @@ class Quadric(Surface):
                    k=0 (Sphere), k=-1 (Parabola), k<-1 (Hyperbola).
     """
 
-    def __init__(self, c: float, k: float, transform: RayTransform = None,
+    def __init__(self, c: float, k: float, transform: Optional[Union[RayTransform, None]] = None,
                  c_grad: bool = False, k_grad: bool = False):
 
         super().__init__(transform = transform)
@@ -402,7 +403,7 @@ class Cone(Surface):
     This parameterization is smooth through the planar transition (k=0).
     """
 
-    def __init__(self, slope: float, slope_grad: bool = False, transform: RayTransform = None):
+    def __init__(self, slope: float, slope_grad: bool = False, transform: Optional[Union[RayTransform, None]] = None):
         super().__init__(transform=transform)
         # We parameterize by dz/dr (slope) to avoid infinite gradients at the plane limit.
         self.slope = nn.Parameter(torch.as_tensor(slope), requires_grad=slope_grad)

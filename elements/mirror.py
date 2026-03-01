@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import math
-from typing import Optional
+from typing import Optional, Union
 
 from geom import RayTransform
 from .parent import Element
@@ -23,7 +23,7 @@ class SphericalMirror(Mirror):
 
     def __init__(self, c1: float, d: float,
                  c1_grad: bool = False, d_grad: bool = False,
-                 transform: Optional[RayTransform] = None):
+                 transform: Optional[Union[RayTransform, None]] = None):
 
         super().__init__()
 
@@ -56,7 +56,7 @@ class CylindricalMirror(Mirror):
 
     def __init__(self, c1: float, d: float,
                  c1_grad: bool = False, d_grad: bool = False,
-                 transform: Optional[RayTransform] = None):
+                 transform: Optional[Union[RayTransform, None]] = None):
 
         super().__init__()
 
@@ -92,7 +92,7 @@ class ParabolicMirror(Mirror):
 
     def __init__(self, c1: float, d: float,
                  c1_grad: bool = False, d_grad: bool = False,
-                 transform: Optional[RayTransform] = None):
+                 transform: Optional[Union[RayTransform, None]] = None):
 
         super().__init__()
 
@@ -127,7 +127,7 @@ class ParabolicMirrorXZ(Mirror):
 
     def __init__(self, c1: float, d: float,
                  c1_grad: bool = False, d_grad: bool = False,
-                 transform: Optional[RayTransform] = None):
+                 transform: Optional[Union[RayTransform, None]] = None):
 
         super().__init__()
 
