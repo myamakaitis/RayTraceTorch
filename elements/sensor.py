@@ -38,6 +38,11 @@ class Sensor(Element):
 
         return new_pos_global, new_dir_global, intensity_mult
 
+    def reset(self):
+        self.hitLocs      = []
+        self.hitIntensity = []
+        self.hitID        = []
+
     def getHitsTensors(self):
 
         return torch.cat(self.hitLocs, dim=0), torch.cat(self.hitIntensity, dim=0), torch.cat(self.hitID, dim=0),

@@ -4,6 +4,8 @@ import torch.nn as nn
 from .transform import RayTransform
 from .primitives import Surface, Plane, Sphere, Quadric, QuadricZY, intersectEpsilon, Cone
 
+from typing import Optional, Union
+
 class SurfaceBounded(Surface):
     """
     Base class for bounded surfaces
