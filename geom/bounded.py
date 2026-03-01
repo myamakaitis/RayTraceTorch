@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 from .transform import RayTransform
-from .primitives import Surface, Plane, Sphere, Quadric, QuadricZY, intersectEpsilon
+from .primitives import Surface, Plane, Sphere, Quadric, QuadricZY, intersectEpsilon, Cone
 
 class SurfaceBounded(Surface):
     """
@@ -162,3 +162,35 @@ class HalfCyl(QuadricZY, SurfaceBounded):
 
         sag = (self.c * r_sq) / denom
         return sag + self.transform.trans[2]
+
+
+class SingleCone(Cone, SurfaceBounded):
+    """
+    A Single Cone (one nappe) derived from the Double Cone.
+
+    Logic:
+    The parameter 'slope' determines which side of the Z-axis is valid.
+    - If slope > 0: Valid where z >= 0 (Opens Up)
+    - If slope < 0: Valid where z <= 0 (Opens Down)
+    - If slope = 0: Valid where z = 0  (Plane)
+
+    This allows a smooth transition from a cone opening up, flattening to a plane,
+    and then opening down, without singularities.
+    """
+
+    def __init__(self, slope: float, slope_grad: bool = False,
+                 invert: bool = False, transform: RayTransform = None):
+        # Initialize parent Cone (geometry)
+        Cone.__init__(self, slope=slope, slope_grad=slope_grad, transform=transform)
+
+    def inBounds(self, local_pos):
+        """
+        Filters the double-cone intersections to keep only the single nappe.
+        Constraint: z * slope >= 0
+        """
+        z = local_pos[:, 2]
+
+        # Check alignment of Z coordinate with the slope direction.
+        # Use -epsilon to be inclusive of the exact vertex/plane at z=0.
+        return (z * self.slope) >= -intersectEpsilon
+

@@ -36,6 +36,10 @@ def ParaxialRefractMat(Cx, Cy, ior_1, ior_2: torch.Tensor) -> torch.Tensor:
 
     return Mat
 
+def ParaxialMirrorMat(Cx, Cy: torch.Tensor) -> torch.Tensor:
+
+    pass
+
 class LinearElement(Element):
 
     def __init__(self, shape : Plane, linSurfFunc : Linear):
@@ -108,3 +112,9 @@ class IdealCylThinLens(LinearElement):
     @property
     def fy(self):
         return -1 / self.Py
+
+
+class IdealMirror(LinearElement):
+
+    pass
+

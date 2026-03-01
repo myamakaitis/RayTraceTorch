@@ -390,8 +390,105 @@ class QuadricZY(Quadric):
 
 
 class Cone(Surface):
-    def __init__(self):
-        raise NotImplementedError()
+    """
+    A Double Cone aligned to the Z-axis with vertex at z=0.
+
+    Equation: z^2 - slope^2 * (x^2 + y^2) = 0
+
+    Parameterization:
+        slope (k): dz/dr.
+        - k = 0  => Plane (z=0)
+
+    This parameterization is smooth through the planar transition (k=0).
+    """
+
+    def __init__(self, slope: float, slope_grad: bool = False, transform: RayTransform = None):
+        super().__init__(transform=transform)
+        # We parameterize by dz/dr (slope) to avoid infinite gradients at the plane limit.
+        self.slope = nn.Parameter(torch.as_tensor(slope), requires_grad=slope_grad)
+
+    def _solve_t(self, local_pos, local_dir):
+        # Ray: P(t) = O + tD
+        # Cone: z^2 - k^2(x^2 + y^2) = 0
+
+        ox, oy, oz = local_pos[:, 0], local_pos[:, 1], local_pos[:, 2]
+        dx, dy, dz = local_dir[:, 0], local_dir[:, 1], local_dir[:, 2]
+
+        k2 = self.slope ** 2
+
+        # Substitute and group terms for At^2 + Bt + C = 0
+
+        # A = Dz^2 - k^2(Dx^2 + Dy^2)
+        A = dz ** 2 - k2 * (dx ** 2 + dy ** 2)
+
+        # B = 2*Oz*Dz - 2*k^2*(Ox*Dx + Oy*Dy)
+        B = 2.0 * (oz * dz - k2 * (ox * dx + oy * dy))
+
+        # C = Oz^2 - k^2(Ox^2 + Oy^2)
+        C = oz ** 2 - k2 * (ox ** 2 + oy ** 2)
+
+        discriminant = B ** 2 - 4.0 * A * C
+
+        # Initialize t as infinity (miss)
+        inf = float('inf')
+
+        # Handle valid intersections
+        hit_mask = discriminant >= 0
+
+        # Use a safe discriminant for sqrt to avoid NaNs in gradient backward pass
+        sqrt_delta = torch.sqrt(torch.where(hit_mask, discriminant, torch.zeros_like(discriminant)))
+
+        # Handle linear case (A ~ 0) where ray is parallel to generator
+        mask_linear = torch.abs(A) < self.epsilon
+        A_safe = torch.where(mask_linear, torch.ones_like(A), A)
+
+        t1 = (-B - sqrt_delta) / (2.0 * A_safe)
+        t2 = (-B + sqrt_delta) / (2.0 * A_safe)
+
+        # Linear fallback: Bt + C = 0 => t = -C/B
+        B_safe = torch.where(torch.abs(B) < self.epsilon, torch.full_like(B, self.epsilon.item()), B)
+        t_linear = -C / B_safe
+
+        # Mask invalid hits
+        t1 = torch.where(hit_mask, t1, torch.full_like(t1, inf))
+        t2 = torch.where(hit_mask, t2, torch.full_like(t2, inf))
+
+        # Apply linear fallback
+        t1 = torch.where(mask_linear, t_linear, t1)
+        t2 = torch.where(mask_linear, t_linear, t2)
+
+        return [t1, t2]
+
+    def _getNormal(self, local_pos):
+        # Implicit surface F(x,y,z) = z^2 - k^2(x^2 + y^2)
+        # Gradient is normal (unnormalized)
+        # dF/dx = -2 * k^2 * x
+        # dF/dy = -2 * k^2 * y
+        # dF/dz = 2 * z
+
+        k2 = self.slope ** 2
+
+        nx = -k2 * local_pos[:, 0]
+        ny = -k2 * local_pos[:, 1]
+        nz = local_pos[:, 2]  # Factor of 2 removed as common scalar
+
+        raw_normal = torch.stack([nx, ny, nz], dim=1)
+
+        # Normalize
+        norm_len = torch.norm(raw_normal, dim=1, keepdim=True)
+
+        # Robustness Check:
+        # At the vertex (0,0,0) or flat plane (k=0, z=0), the gradient vector vanishes.
+        # We default to +Z (0,0,1) in these singular cases.
+        valid_norm = norm_len > 1e-8
+
+        local_normal = torch.where(
+            valid_norm,
+            raw_normal / (norm_len + 1e-8),
+            torch.tensor([0.0, 0.0, 1.0], device=raw_normal.device, dtype=raw_normal.dtype)
+        )
+
+        return local_normal
 
 
 class WedgeYZ(Cone):
