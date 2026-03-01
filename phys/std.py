@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ..geom.transform import RayTransform
 
+from typing import Optional, Union
+
 class SurfaceFunction(nn.Module):
     """
     Base class for optical surface physics.
@@ -57,7 +59,7 @@ class Linear(SurfaceFunction):
 
         Args:
             local_intersect (Tensor): [N, 3] Intersection location in local coordinates.
-            ray_dir (Tensor): [N, 3] Normalized incident direction (Local or Global).
+            ray_dir (Tensor): [N, 3] Normalized incident direction (Global).
             normal (Tensor):  [N, 3] Normalized surface normal at hit point.
             **kwargs:         Allow passing extra data (wavelength, etc.) that
                               specific children might need.
@@ -294,7 +296,7 @@ class Block(SurfaceFunction):
     The ray is effectively terminated.
     We represent this by zeroing the intensity.
     """
-    def forward(self, intersect, ray_dir, normal, **kwargs):
+    def forward(self, local_intersect, ray_dir, normal, **kwargs):
         # 1. Direction:
         # We can either keep the old direction (ghost ray) or zero it out.
         # Zeroing it makes it obvious visually if something went wrong (ray vanishes).

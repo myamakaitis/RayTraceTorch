@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import List, Union
+from typing import List, Union, Optional
 
 from .parent import Element
 from ..geom import Plane, Disk, RayTransform
