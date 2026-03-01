@@ -65,7 +65,7 @@ class LinearElement(Element):
 class IdealThinLens(LinearElement):
 
     def __init__(self, focal: float, focal_grad: bool = False,
-                 diameter: float = float("inf"), transform: RayTransform = None):
+                 diameter: float = float("inf"), transform: Optional[Union[RayTransform, None]] = None):
 
         if diameter == float("inf"):
             plane = Plane(transform=transform)
@@ -91,7 +91,7 @@ class IdealCylThinLens(LinearElement):
 
     def __init__(self, focal_x: float, focal_y: float,
                  focal_x_grad: bool = False, focal_y_grad: bool =False,
-                 diameter: float = float("inf"), transform: RayTransform = None):
+                 diameter: float = float("inf"), transform: Optional[Union[RayTransform, None]] = None):
 
         if diameter == float("inf"):
             plane = Plane(transform=transform)
@@ -122,7 +122,7 @@ class IdealMirror(LinearElement):
 
     def __init__(self, radius_x: float, radius_y: float,
                  radius_x_grad: bool = False, radius_y_grad: bool = False,
-                 diameter: float = float("inf"), transform: RayTransform = None):
+                 diameter: float = float("inf"), transform: Optional[Union[RayTransform, None]] = None):
 
         if diameter == float("inf"):
             plane = Plane(transform=transform)

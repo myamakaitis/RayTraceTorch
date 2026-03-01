@@ -10,7 +10,7 @@ def LambertianSample():
 class PanelSource(Bundle):
 
     def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32,
-                 transform: RayTransformBundle = None):
+                 transform: Optional[Union[RayTransform, None]]Bundle = None):
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
 class RectangularPanel(PanelSource):

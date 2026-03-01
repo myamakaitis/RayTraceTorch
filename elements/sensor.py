@@ -1,6 +1,6 @@
 import torch
 
-from typing import Union
+from typing import Union, Optional
 
 from ..geom import Surface, Shape
 from .parent import Element

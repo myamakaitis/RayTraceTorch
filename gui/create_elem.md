@@ -31,7 +31,7 @@ The introspection logic must handle complex type hints used in scientific comput
 
 
 * **Optional Sub-Objects:**
-* If a nested class argument defaults to `None` (e.g., `transform: RayTransform = None`), the generated `QGroupBox` must be **Checkable**.
+* If a nested class argument defaults to `None` (e.g., `transform: Optional[Union[RayTransform, None]] = None`), the generated `QGroupBox` must be **Checkable**.
 * **Unchecked:** Passes `None` to the constructor.
 * **Checked:** Instantiates the object using the sub-form values.
 

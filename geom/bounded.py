@@ -9,7 +9,7 @@ class SurfaceBounded(Surface):
     Base class for bounded surfaces
     """
 
-    def __init__(self, transform: RayTransform=None, invert: bool=False):
+    def __init__(self, transform: Optional[Union[RayTransform, None]]=None, invert: bool=False):
 
         super().__init__(transform=transform)
         self.surface = None
@@ -51,7 +51,7 @@ class Disk(Plane, SurfaceBounded):
     Circular aperture defined by a radius.
     """
 
-    def __init__(self, radius: float, invert: bool =False, transform: RayTransform = None):
+    def __init__(self, radius: float, invert: bool =False, transform: Optional[Union[RayTransform, None]] = None):
         super().__init__(transform=transform, invert=invert)
         self.radius = nn.Parameter(torch.as_tensor(radius), requires_grad=False)
 
@@ -67,7 +67,7 @@ class Rectangle(Plane, SurfaceBounded):
     Rectangular aperture defined by half-widths in X and Y.
     """
 
-    def __init__(self, half_x: float, half_y: float, invert: bool = False, transform: RayTransform = None):
+    def __init__(self, half_x: float, half_y: float, invert: bool = False, transform: Optional[Union[RayTransform, None]] = None):
         super().__init__(transform=transform, invert=invert)
         self.hx = nn.Parameter(torch.as_tensor(half_x, dtype=torch.float32))
         self.hy = nn.Parameter(torch.as_tensor(half_y, dtype=torch.float32))
@@ -87,7 +87,7 @@ class Ellipse(Plane, SurfaceBounded):
 
     def __init__(self, r_major : float, r_minor: float, rot: float,
                        r_major_grad:bool = False, r_minor_grad:bool = False, rot_grad: bool = False,
-                 invert: bool = False, transform: RayTransform = None):
+                 invert: bool = False, transform: Optional[Union[RayTransform, None]] = None):
         super().__init__(transform=transform, invert=invert)
         self.r_minor = nn.Parameter(torch.as_tensor(r_minor), requires_grad=r_minor_grad)
         self.r_major = nn.Parameter(torch.as_tensor(r_major), requires_grad=r_major_grad)
@@ -115,7 +115,7 @@ class HalfSphere(Quadric, SurfaceBounded):
     R < 0 (Convex Back): Center is to Left. Valid surface is Right of Center (Z > 0).
     """
 
-    def __init__(self, curvature: float, curvature_grad:bool, transform: RayTransform=None):
+    def __init__(self, curvature: float, curvature_grad:bool, transform: Optional[Union[RayTransform, None]]=None):
         super().__init__(c = curvature, c_grad=curvature_grad, k = 0.0, k_grad=False, transform=transform)
 
     def inBounds(self, local_pos):
@@ -142,7 +142,7 @@ class HalfCyl(QuadricZY, SurfaceBounded):
     A Cylindrical surface clipped to the valid hemisphere (relative to curvature).
     """
 
-    def __init__(self, curvature: float, curvature_grad: bool, transform: RayTransform=None):
+    def __init__(self, curvature: float, curvature_grad: bool, transform: Optional[Union[RayTransform, None]]=None):
         # Initialize as QuadricZY with k=0 (Cylinder)
         super().__init__(c=curvature, c_grad=curvature_grad, k=0.0, k_grad=False, transform=transform)
 
@@ -179,7 +179,7 @@ class SingleCone(Cone, SurfaceBounded):
     """
 
     def __init__(self, slope: float, slope_grad: bool = False,
-                 invert: bool = False, transform: RayTransform = None):
+                 invert: bool = False, transform: Optional[Union[RayTransform, None]] = None):
         # Initialize parent Cone (geometry)
         Cone.__init__(self, slope=slope, slope_grad=slope_grad, transform=transform)
 

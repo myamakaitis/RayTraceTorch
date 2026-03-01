@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import List, Union
+from typing import List, Union, Optional
 
 from ..geom import Shape, Surface, Plane
 from ..phys import SurfaceFunction, Reflect, Linear
@@ -24,7 +24,7 @@ class Element(nn.Module):
         """
         super().__init__()
 
-        self.shape = None
+        self.shape = Shape()
         self.surface_functions = nn.ModuleList()
 
     def intersectTest(self, rays):

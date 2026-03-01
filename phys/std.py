@@ -37,7 +37,7 @@ class Linear(SurfaceFunction):
                 Dx: float = 1, Dy = 1,
                 Cx_grad = False, Cy_grad = False,
                 Dx_grad = False, Dy_grad = False,
-                transform: RayTransform =None):
+                transform: Optional[Union[RayTransform, None]] =None):
 
         super().__init__()
         self.Cx = nn.Parameter(torch.as_tensor(Cx), requires_grad=Cx_grad)

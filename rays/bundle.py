@@ -7,7 +7,7 @@ from torch.distributions import Uniform
 
 class Bundle:
 
-    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
+    def __init__(self, ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: Optional[Union[RayTransform, None]]Bundle = None):
 
         self.ray_id = ray_id
         self.device = device
@@ -80,7 +80,7 @@ class SolidAngleSample:
 class CollimatedDisk(Bundle):
 
     def __init__(self, radius: float,
-                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: Optional[Union[RayTransform, None]]Bundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -98,7 +98,7 @@ class CollimatedDisk(Bundle):
 class CollimatedLine(Bundle):
 
     def __init__(self, length: float,
-                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: Optional[Union[RayTransform, None]]Bundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -123,7 +123,7 @@ class Fan(Bundle):
     """
 
     def __init__(self, angle: float,
-                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: Optional[Union[RayTransform, None]]Bundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 
@@ -143,7 +143,7 @@ class PointSource(Bundle):
     """
 
     def __init__(self, NA: float,
-                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: RayTransformBundle = None):
+                 ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: Optional[Union[RayTransform, None]]Bundle = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
 

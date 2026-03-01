@@ -5,6 +5,8 @@ from .bounded import HalfCyl
 from .shape import Shape, Box4Side
 from .transform import RayTransform
 
+from typing import Optional, Union
+
 class Cylindric(Shape):
     """
     Base class for cylindrical/toroidal lens stacks.
@@ -64,7 +66,7 @@ class CylSinglet(Cylindric):
                  width: float, height: float, T: float,
                  C1_grad: bool=True, C2_grad: bool=True,
                  T_grad: bool=True, w_grad: bool=False, h_grad: bool=False,
-                 transform: RayTransform=None):
+                 transform: Optional[Union[RayTransform, None]]=None):
         """
         Args:
             C1, C2: Curvature in Y-direction.

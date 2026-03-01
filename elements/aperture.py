@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import Optional, Union
 
 from geom import RayTransform
 from .parent import Element
