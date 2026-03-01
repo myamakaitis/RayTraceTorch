@@ -2,3 +2,4 @@
 /tests/__pycache__
 /rays/__pycache__
 *.pyc
+/.vscode

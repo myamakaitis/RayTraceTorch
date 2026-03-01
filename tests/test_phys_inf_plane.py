@@ -67,20 +67,6 @@ def test_snell():
     assert True
 
 
-def test_snell():
-
-    refract1 = rtt.phys.RefractSnell(1.4, 1.0)
-    VisualizePhys(refract1, "RefractSnell_1.0to1.4")
-
-    refract2 = rtt.phys.RefractSnell(1.8, 1.0)
-    VisualizePhys(refract2, "RefractSnell_1.0to1.8")
-
-    refract3 = rtt.phys.RefractSnell(1.0, 1.4)
-    VisualizePhys(refract3, "RefractSnell_1.4to1.0")
-
-    assert True
-
-
 def test_fresnel():
 
     refract1 = rtt.phys.RefractFresnel(1.4, 1.0)

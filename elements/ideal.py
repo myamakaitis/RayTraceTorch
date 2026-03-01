@@ -38,7 +38,11 @@ def ParaxialRefractMat(Cx, Cy, ior_1, ior_2: torch.Tensor) -> torch.Tensor:
 
 def ParaxialMirrorMat(Cx, Cy: torch.Tensor) -> torch.Tensor:
 
-    pass
+    Mat = torch.eye(5, device=Cx.device, dtype=Cx.dtype)
+    Mat = Mat.index_put((torch.tensor([1, 3]), torch.tensor([0, 2])),
+                        torch.stack([-2*Cx, -2*Cy]))
+
+    return Mat
 
 class LinearElement(Element):
 
@@ -116,5 +120,44 @@ class IdealCylThinLens(LinearElement):
 
 class IdealMirror(LinearElement):
 
-    pass
+    def __init__(self, radius_x: float, radius_y: float,
+                 radius_x_grad: bool = False, radius_y_grad: bool = False,
+                 diameter: float = float("inf"), transform: RayTransform = None):
+
+        if diameter == float("inf"):
+            plane = Plane(transform=transform)
+        else:
+            plane = Disk(radius=diameter/2, transform=transform)
+
+        linSurfFunc = Linear()
+
+        super().__init__(shape=plane, linSurfFunc=linSurfFunc)
+
+        # Store mirror power Px = -2/Rx, Py = -2/Ry.
+        # Sign convention mirrors IdealThinLens (P = -1/f): focusing elements have P < 0.
+        self.Px = nn.Parameter(torch.as_tensor(-2.0 / radius_x), requires_grad=radius_x_grad)
+        self.Py = nn.Parameter(torch.as_tensor(-2.0 / radius_y), requires_grad=radius_y_grad)
+
+        self.surface_functions[0].Cx = self.Px
+        self.surface_functions[0].Cy = self.Py
+
+    def _paraxial(self):
+        # Curvature C = -P/2; pass curvatures to ParaxialMirrorMat
+        return ParaxialMirrorMat(-self.Px / 2, -self.Py / 2)
+
+    @property
+    def fx(self):
+        return -1 / self.Px
+
+    @property
+    def fy(self):
+        return -1 / self.Py
+
+    @property
+    def Rx(self):
+        return -2 / self.Px
+
+    @property
+    def Ry(self):
+        return -2 / self.Py
 
