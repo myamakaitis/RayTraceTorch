@@ -35,7 +35,7 @@ class ApertureFilter(Transmit):
 
 class Fuzzy(Transmit):
 
-    def __init__(self, intensity_function : callable):
+    def __init__(self, intensity_function : Callable):
 
         super().__init__()
 
