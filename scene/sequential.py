@@ -26,7 +26,7 @@ class SequentialScene(Scene):
                     continue
 
                 # Extract valid rays
-                rays_valid = rays.subset(ray_mask)
+                rays_valid = rays[ray_mask]
 
                 # Apply surface interaction
                 new_pos, new_dir, intensity_mod = element(rays_valid, i)

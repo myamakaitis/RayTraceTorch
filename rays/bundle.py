@@ -44,8 +44,8 @@ class DiskSample:
 
     def sample(self, N: int):
 
-        theta = self.t_distribution.sample(N).squeeze()
-        r = torch.sqrt(self.r_distribution.sample(N)).squeeze()
+        theta = self.t_distribution.sample((N,)).squeeze()
+        r = torch.sqrt(self.r_distribution.sample((N,))).squeeze()
 
         x = r * torch.cos(theta)
         y = r * torch.sin(theta)
@@ -62,8 +62,8 @@ class SolidAngleSample:
 
     def sample(self, N: int):
 
-        phi = self.invCDF_phi(self.phi_distribution.sample(N)).squeeze()
-        theta = self.t_distribution.sample(N).squeeze()
+        phi = self.invCDF_phi(self.phi_distribution.sample((N,))).squeeze()
+        theta = self.t_distribution.sample((N,)).squeeze()
 
         return phi, theta
 

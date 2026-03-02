@@ -46,13 +46,13 @@ from RayTraceTorch.optim import (
 #
 # Perturb C1 by +2 m⁻¹ to give the optimiser something to fix.
 
-C1 =  34.26   # perturbed (true ≈ 32.26)
-C2 = -54.05
-C3 =  -7.14
+C1 =  0.05   # perturbed (true ≈ 32.26)
+C2 = -0.015
+C3 =  -.0014
 
-D  = 0.025    # 25 mm clear aperture
-T1 = 0.006    # 6 mm crown element
-T2 = 0.0025   # 2.5 mm flint element
+D  = 25    # 25 mm clear aperture
+T1 = 6    # 6 mm crown element
+T2 = 2.5   # 2.5 mm flint element
 n1 = 1.517    # BK7
 n2 = 1.648    # SF2
 
@@ -67,7 +67,7 @@ lens = DoubletLens(
 # ---------------------------------------------------------------------------
 # 2.  Sensor  (placed at approximate BFL ≈ 52 mm past lens centre)
 # ---------------------------------------------------------------------------
-SENSOR_Z = 0.052   # metres
+SENSOR_Z = 50   # metres
 
 sensor = Sensor(
     Disk(radius=0.005,
@@ -107,20 +107,20 @@ bundles = [
 # ---------------------------------------------------------------------------
 # 5.  Loss functions and constraints
 # ---------------------------------------------------------------------------
-focal_loss = FocalLengthLoss(scene, f_target=0.050)  # target 50 mm
+focal_loss = FocalLengthLoss(scene, f_target=50)  # target 50 mm
 spot_loss  = SpotSizeLoss(scene, sensor, bundles, N_rays=64)
 
 # Intra-element: 0.5 mm < thickness < 15 mm
 thick_c = ThicknessConstraint(
-    [lens], t_min=0.0005, t_max=0.015, weight=0.05
+    [lens], t_min=0.5, t_max=15, weight=0.05
 )
 # Inter-element: sensor must be at least 5 mm past the lens
 space_c = SpacingConstraint(
-    [lens, sensor], d_min=0.005, weight=0.05
+    [lens, sensor], d_min=5, weight=0.05
 )
 # Total system: first surface to sensor < 120 mm
 length_c = SystemLengthConstraint(
-    [lens, sensor], L_max=0.120, weight=0.05
+    [lens, sensor], L_max=120, weight=0.05
 )
 
 # ---------------------------------------------------------------------------
