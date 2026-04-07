@@ -54,10 +54,14 @@ class RenderViewport:
         self.ray_linewidth: float = 1.0
         self.ray_opacity: int = 160
 
+        # IDs of draw_line items currently compositing the ray overlay.
+        # Tracked explicitly so we can delete them by ID without needing a
+        # draw_node container (which has unreliable dynamic-child support).
+        self._overlay_items: list = []
+
         # DPG tags
         self._tex_tag      = "rtvp__tex"
         self._drawlist_tag = "rtvp__drawlist"
-        self._paths_node   = "rtvp__paths"
 
         # Mouse state
         self._prev_mouse: tuple = (0.0, 0.0)
@@ -75,8 +79,8 @@ class RenderViewport:
         with dpg.drawlist(width=self._w, height=self._h,
                           tag=self._drawlist_tag, parent=parent_tag):
             dpg.draw_image(self._tex_tag, (0, 0), (self._w, self._h))
-            # Container for ray-path line overlays (children deleted/rebuilt each sim)
-            dpg.draw_node(tag=self._paths_node)
+            # Ray overlay lines are added directly to the drawlist and tracked
+            # by ID in self._overlay_items — no draw_node container needed.
 
     def register_mouse_handlers(self):
         """
@@ -93,7 +97,10 @@ class RenderViewport:
 
     def redraw_overlay(self):
         """Redraw just the ray-path overlay without re-rendering the scene."""
-        self._draw_path_overlay()
+        try:
+            self._draw_path_overlay()
+        except Exception as e:
+            print(f"[RenderViewport] overlay error: {e}")
 
     def refresh(self):
         """Re-render the scene and update the texture + path overlay."""
@@ -106,7 +113,10 @@ class RenderViewport:
         except Exception as e:
             print(f"[RenderViewport] render error: {e}")
 
-        self._draw_path_overlay()
+        try:
+            self._draw_path_overlay()
+        except Exception as e:
+            print(f"[RenderViewport] overlay error: {e}")
 
     # ------------------------------------------------------------------
     # Ray-path overlay
@@ -114,15 +124,20 @@ class RenderViewport:
 
     def _draw_path_overlay(self):
         """Project recorded ray paths into screen space and draw as lines."""
-        dpg.delete_item(self._paths_node, children_only=True)
+        # Delete previously drawn overlay lines by their stored item IDs.
+        for item_id in self._overlay_items:
+            if dpg.does_item_exist(item_id):
+                dpg.delete_item(item_id)
+        self._overlay_items.clear()
+
         if not self.ray_visible or len(self.ray_path_history) < 2:
             return
 
         # Subsample rays for performance (draw at most 100)
         n_rays = self.ray_path_history[0].shape[0]
         max_vis = 100
-        step = max(1, n_rays // max_vis)
-        ray_indices = range(0, n_rays, step)
+        stride = max(1, n_rays // max_vis)
+        ray_indices = range(0, n_rays, stride)
 
         cam = self._camera
         w, h = self._w, self._h
@@ -136,12 +151,13 @@ class RenderViewport:
                 sc, visible = self._project_point(pt3d, cam, w, h)
                 if visible and sc is not None:
                     if prev_screen is not None:
-                        dpg.draw_line(
+                        item_id = dpg.draw_line(
                             prev_screen, sc,
                             color=color,
                             thickness=thickness,
-                            parent=self._paths_node,
+                            parent=self._drawlist_tag,
                         )
+                        self._overlay_items.append(item_id)
                     prev_screen = sc
                 else:
                     prev_screen = None   # break the line on occluded segments

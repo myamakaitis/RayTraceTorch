@@ -4,6 +4,7 @@ from ..geom import RayTransformBundle
 from .ray import Rays
 import torch.nn.functional as F
 from typing import Union, Optional
+from torch.distributions import Uniform
 
 class Bundle(nn.Module):
 

@@ -1,4 +1,4 @@
-from .ray import Rays
+from .ray import Rays, Paths
 from .bundle import (
     Bundle,
     DiskSample,

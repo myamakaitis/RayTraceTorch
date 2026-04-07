@@ -145,6 +145,10 @@ class Scene(nn.Module):
         """
         Find the closest surface hit for every ray.
 
+        Accepts either a plain ``Rays`` tensorclass or a ``Paths`` proxy —
+        the proxy is unwrapped before being handed to element intersection
+        code so that element physics never needs to be aware of ``Paths``.
+
         Returns
         -------
         ``(hit_mask, winner_element_ids, winner_surf_ids)`` or ``None`` if
@@ -153,8 +157,11 @@ class Scene(nn.Module):
         if len(self.elements) == 0:
             return None
 
+        # Unwrap Paths → Rays so elements only ever see the raw tensorclass
+        raw = rays.unwrap() if hasattr(rays, 'unwrap') else rays
+
         with torch.no_grad():
-            t_candidates = [element.intersectTest(rays) for element in self.elements]
+            t_candidates = [element.intersectTest(raw) for element in self.elements]
             if not t_candidates:
                 return None
 
@@ -205,4 +212,11 @@ class Scene(nn.Module):
                 next_dir       = next_dir.masked_scatter(specific_mask.unsqueeze(-1), out_dir)
                 next_intensity = next_intensity.masked_scatter(specific_mask, out_intensity)
 
-        self.rays.scatter_update(active_mask, next_pos, next_dir, next_intensity)
+        # scatter_update uses index_put with the boolean mask, so it expects
+        # value tensors of shape [M, ...] where M = active_mask.sum(), not [N, ...].
+        self.rays.scatter_update(
+            active_mask,
+            next_pos[active_mask],
+            next_dir[active_mask],
+            next_intensity[active_mask],
+        )

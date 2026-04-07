@@ -13,6 +13,7 @@ import typing
 from typing import Union, List, Tuple, Optional
 
 import torch
+import torch.nn as nn
 import dearpygui.dearpygui as dpg
 
 # Wildcard imports make the recursive class-finder work for all subclasses.
@@ -88,6 +89,7 @@ def get_constructor_params(cls) -> dict:
 
 
 def get_actual_class(p_type):
+    """Return the first concrete class in a type annotation (Union-aware)."""
     if inspect.isclass(p_type):
         return p_type
     origin = typing.get_origin(p_type)
@@ -96,6 +98,25 @@ def get_actual_class(p_type):
             if inspect.isclass(arg) and arg is not type(None):
                 return arg
     return None
+
+
+def get_all_actual_classes(p_type) -> list:
+    """
+    Return ALL class types present in a type annotation.
+
+    For ``Union[Shape, Surface]`` this returns ``[Shape, Surface]`` rather
+    than just the first match, which is needed when a parameter accepts
+    instances of several different class hierarchies.
+    """
+    if inspect.isclass(p_type):
+        return [p_type]
+    origin = typing.get_origin(p_type)
+    if origin is typing.Union:
+        return [
+            arg for arg in typing.get_args(p_type)
+            if inspect.isclass(arg) and arg is not type(None)
+        ]
+    return []
 
 
 # ============================================================
@@ -127,22 +148,40 @@ except Exception:
     _KNOWN_BASES = [Bundle]
 
 
-def instantiate_from_config(config: dict):
+def instantiate_from_config(config: dict,
+                            device=None,
+                            dtype=None):
     """
-    Build a Python object from a {'name', 'class', 'params'} config dict.
-    Does not require any dpg widgets — safe to call outside the dpg context.
+    Build a Python object from a ``{'name', 'class', 'params'}`` config dict.
+
+    ``device`` and ``dtype`` are injected into every constructor that accepts
+    them but hides them from the form (they appear in ``_HIDDEN_PARAMS``).
+    Pass the workbench's active device/dtype so all objects land on the same
+    hardware from the moment they are created.
+
+    Safe to call outside the dpg context — no widget access.
     """
     cls_name = config.get('class', '')
     params = config.get('params', {})
     cls = _find_class_by_name(cls_name)
     if cls is None:
         raise ValueError(f"Cannot find class '{cls_name}'. Check imports.")
-    return _instantiate_recursive(cls, params)
+    return _instantiate_recursive(cls, params, device=device, dtype=dtype)
 
 
-def _instantiate_recursive(cls, params: dict):
+def _instantiate_recursive(cls, params: dict, device=None, dtype=None):
     kwargs = {}
     ctor_params = get_constructor_params(cls)
+
+    # Inject device / dtype for any constructor that accepts them but whose
+    # widgets are suppressed by _HIDDEN_PARAMS.  This guarantees every
+    # sub-object (transforms, shapes, bundles …) is created on the correct
+    # device without the user needing to set it manually.
+    if device is not None and 'device' in ctor_params and 'device' not in params:
+        kwargs['device'] = device
+    if dtype is not None and 'dtype' in ctor_params and 'dtype' not in params:
+        kwargs['dtype'] = dtype
+
     for name, (p_type, default) in ctor_params.items():
         if name not in params:
             continue
@@ -167,7 +206,17 @@ def _instantiate_recursive(cls, params: dict):
             if val is None:
                 kwargs[name] = None
             elif isinstance(val, dict) and target_cls:
-                kwargs[name] = _instantiate_recursive(target_cls, val)
+                # A CLASS with subclasses is stored in POLY_CLASS format:
+                # {'class': X, 'params': {...}} — unwrap and use selected subclass.
+                if 'class' in val and 'params' in val:
+                    sub_name = val['class']
+                    sub_cls = _find_class_by_name(sub_name) or target_cls
+                    kwargs[name] = _instantiate_recursive(
+                        sub_cls, val['params'], device=device, dtype=dtype)
+                else:
+                    # Plain flat dict from a tree_node CLASS (no subclass selection)
+                    kwargs[name] = _instantiate_recursive(
+                        target_cls, val, device=device, dtype=dtype)
         elif intent == 'POLY_CLASS':
             if val is None:
                 kwargs[name] = None
@@ -175,7 +224,8 @@ def _instantiate_recursive(cls, params: dict):
                 sub_name = val.get('class', '')
                 sub_cls = _find_class_by_name(sub_name)
                 if sub_cls:
-                    kwargs[name] = _instantiate_recursive(sub_cls, val.get('params', {}))
+                    kwargs[name] = _instantiate_recursive(
+                        sub_cls, val.get('params', {}), device=device, dtype=dtype)
                 else:
                     kwargs[name] = None
 
@@ -211,11 +261,18 @@ class FormBuilder:
         self._known_classes = {c.__name__: c for c in subs}
         sorted_names = sorted(self._known_classes.keys())
 
-        dpg.add_input_text(label="Name", tag=self._name_tag,
-                           parent=parent_tag, width=-1)
-        dpg.add_combo(sorted_names, label="Type",
-                      tag=self._class_sel_tag, parent=parent_tag, width=-1,
-                      callback=lambda s, a: self._rebuild_form(a))
+        with dpg.group(horizontal=True, parent=parent_tag):
+            dpg.add_text("Name:")
+            dpg.add_input_text(label=f"##{self._name_tag}", tag=self._name_tag, width=-1)
+        dpg.add_spacer(height=4, parent=parent_tag)
+        with dpg.group(horizontal=True, parent=parent_tag):
+            dpg.add_text("Type:")
+            dpg.add_combo(sorted_names, label=f"##{self._class_sel_tag}",
+                          tag=self._class_sel_tag, width=-1,
+                          callback=lambda s, a: self._rebuild_form(a))
+        dpg.add_spacer(height=6, parent=parent_tag)
+        dpg.add_separator(parent=parent_tag)
+        dpg.add_spacer(height=4, parent=parent_tag)
         with dpg.child_window(tag=self._form_tag, parent=parent_tag,
                                auto_resize_y=True, border=False):
             pass
@@ -261,6 +318,9 @@ class FormBuilder:
     # Params that are managed globally (device/dtype) and hidden from the form
     _HIDDEN_PARAMS = frozenset({'device', 'dtype'})
 
+    # Width (px) of the left-hand label column in inline label/input rows
+    _LABEL_W = 110
+
     def _build_params(self, cls, parent: str, pfx: str, registry: dict, depth: int):
         if depth > 5:
             dpg.add_text("(max depth reached)", parent=parent)
@@ -268,6 +328,7 @@ class FormBuilder:
 
         params = get_constructor_params(cls)
         consumed: set = set()
+        first = True
 
         for name, (p_type, default) in params.items():
             if name in consumed or name in self._HIDDEN_PARAMS:
@@ -279,17 +340,24 @@ class FormBuilder:
             has_grad = bool(grad_partner and grad_partner not in consumed)
             g_tag = f"{pfx}__{grad_partner}" if has_grad else None
 
+            # Breathing room between consecutive fields
+            if not first:
+                dpg.add_spacer(height=5, parent=parent)
+            first = False
+
             if intent == 'BOOL':
+                # Checkbox: DPG puts label to the right — natural for booleans
                 dpg.add_checkbox(label=name, tag=tag, parent=parent,
                                  default_value=bool(default) if default is not None else False)
                 registry[name] = {'tag': tag, 'intent': 'BOOL'}
                 consumed.add(name)
 
             elif intent == 'DTYPE':
-                dpg.add_text(name, parent=parent)
-                dpg.add_combo(["float32", "float64"], label=f"##{tag}", tag=tag,
-                              parent=parent, width=-1,
-                              default_value="float64" if default == torch.float64 else "float32")
+                with dpg.group(horizontal=True, parent=parent):
+                    dpg.add_text(f"{name}:", indent=-1)
+                    dpg.add_combo(["float32", "float64"], label=f"##{tag}", tag=tag,
+                                  width=-1,
+                                  default_value="float64" if default == torch.float64 else "float32")
                 registry[name] = {'tag': tag, 'intent': 'DTYPE'}
                 consumed.add(name)
 
@@ -297,10 +365,10 @@ class FormBuilder:
                 dv = self._unpack_vec3(default)
                 tags = [f"{tag}__0", f"{tag}__1", f"{tag}__2"]
                 with dpg.group(horizontal=True, parent=parent):
-                    dpg.add_text(f"{name}:")
+                    dpg.add_text(f"{name}:", indent=-1)
                     for i, ax in enumerate('XYZ'):
                         dpg.add_input_float(label=ax, tag=tags[i],
-                                            default_value=float(dv[i]), width=72)
+                                            default_value=float(dv[i]), width=95)
                     if has_grad:
                         dpg.add_checkbox(label="grad", tag=g_tag,
                                          default_value=self._is_grad_on(params[grad_partner][1]))
@@ -313,7 +381,7 @@ class FormBuilder:
                 dv = self._unpack_bool3(default)
                 tags = [f"{tag}__0", f"{tag}__1", f"{tag}__2"]
                 with dpg.group(horizontal=True, parent=parent):
-                    dpg.add_text(f"{name}:")
+                    dpg.add_text(f"{name}:", indent=-1)
                     for i, ax in enumerate('XYZ'):
                         dpg.add_checkbox(label=ax, tag=tags[i], default_value=bool(dv[i]))
                     if has_grad:
@@ -325,35 +393,49 @@ class FormBuilder:
                 consumed.add(name)
 
             elif intent == 'CLASS':
-                target_cls = get_actual_class(p_type)
-                if target_cls:
-                    sub_subs = get_subclasses(target_cls)
-                    if sub_subs or target_cls.__name__ in ('Shape', 'Surface'):
-                        self._build_poly(name, target_cls, sub_subs, default,
+                # Collect every class type in the annotation (handles Union[A, B, ...])
+                target_classes = get_all_actual_classes(p_type)
+                if target_classes:
+                    # Merge subclasses from every target type into one set,
+                    # and include any concrete base classes themselves.
+                    combined: set = set()
+                    for tc in target_classes:
+                        combined |= get_subclasses(tc)
+                        if not inspect.isabstract(tc):
+                            combined.add(tc)
+
+                    primary_cls = target_classes[0]   # used as nominal base in _build_poly
+                    needs_poly  = (
+                        len(combined) > 0
+                        or any(tc.__name__ in ('Shape', 'Surface') for tc in target_classes)
+                    )
+                    if needs_poly:
+                        self._build_poly(name, primary_cls, combined, default,
                                          parent, pfx, registry, depth)
                     else:
                         sub_reg: dict = {}
                         with dpg.tree_node(label=name, parent=parent, default_open=True):
-                            self._build_params(target_cls, dpg.last_item(),
+                            self._build_params(primary_cls, dpg.last_item(),
                                                f"{pfx}__{name}", sub_reg, depth + 1)
-                        registry[name] = {'intent': 'CLASS', 'cls': target_cls, 'sub_reg': sub_reg}
+                        registry[name] = {'intent': 'CLASS', 'cls': primary_cls, 'sub_reg': sub_reg}
                     consumed.add(name)
 
             else:  # PRIMITIVE
                 val_str = "" if default is None else str(default)
                 if has_grad:
-                    dpg.add_text(name, parent=parent)
                     with dpg.group(horizontal=True, parent=parent):
+                        dpg.add_text(f"{name}:", indent=-1)
                         dpg.add_input_text(label=f"##{tag}", tag=tag,
-                                           default_value=val_str, width=120)
+                                           default_value=val_str, width=100)
                         dpg.add_checkbox(label="grad", tag=g_tag,
                                          default_value=self._is_grad_on(params[grad_partner][1]))
                     registry[grad_partner] = {'tag': g_tag, 'intent': 'BOOL'}
                     consumed.add(grad_partner)
                 else:
-                    dpg.add_text(name, parent=parent)
-                    dpg.add_input_text(label=f"##{tag}", tag=tag, parent=parent,
-                                       default_value=val_str, width=-1)
+                    with dpg.group(horizontal=True, parent=parent):
+                        dpg.add_text(f"{name}:", indent=-1)
+                        dpg.add_input_text(label=f"##{tag}", tag=tag,
+                                           default_value=val_str, width=-1)
                 registry[name] = {'tag': tag, 'intent': 'PRIMITIVE'}
                 consumed.add(name)
 
@@ -397,9 +479,13 @@ class FormBuilder:
             )
 
         with dpg.group(tag=grp_tag, parent=parent, show=not is_optional):
-            dpg.add_combo(sorted(poly_subs.keys()), label=name, tag=sel_tag, width=-1,
-                          callback=lambda s, a, u: self._rebuild_poly(u, a),
-                          user_data=poly_entry)
+            with dpg.group(horizontal=True):
+                dpg.add_text(f"{name}:", indent=-1)
+                dpg.add_combo(sorted(poly_subs.keys()), label=f"##{sel_tag}", tag=sel_tag,
+                              width=-1,
+                              callback=lambda s, a, u: self._rebuild_poly(u, a),
+                              user_data=poly_entry)
+            dpg.add_spacer(height=2)
             with dpg.child_window(tag=win_tag, auto_resize_y=True, border=True):
                 pass
 
@@ -564,13 +650,16 @@ class ItemManager:
 
     _counter = 0  # class-level counter for unique tag namespacing
 
-    def __init__(self, title: str, base_cls, on_update, on_data_changed=None):
+    def __init__(self, title: str, base_cls, on_update, on_data_changed=None,
+                 device=None, dtype=None):
         ItemManager._counter += 1
         self._pfx = f"imgr{ItemManager._counter}"
         self._title = title
         self._base_cls = base_cls
         self._on_update = on_update
         self._on_data_changed = on_data_changed
+        self._device = device   # injected into every instantiate_from_config call
+        self._dtype  = dtype
 
         self.configs: list = []          # [{'config': {...}}, ...]
         self._editing_idx: int = -1
@@ -655,7 +744,14 @@ class ItemManager:
         errors = []
         for item in self.configs:
             try:
-                obj = instantiate_from_config(item['config'])
+                obj = instantiate_from_config(
+                    item['config'], device=self._device, dtype=self._dtype)
+                # Sub-objects such as RayTransform store nn.Parameters created on
+                # CPU because RayTransform.__init__ has no device arg.  Move the
+                # whole element to device here; workbench also calls _scene.to()
+                # but this ensures the object is correct before it enters the scene.
+                if self._device is not None and isinstance(obj, nn.Module):
+                    obj.to(self._device)
                 objects.append(obj)
             except Exception as e:
                 errors.append(str(e))
@@ -709,8 +805,9 @@ class BundleItemManager(ItemManager):
     Also maintains self.bundle_instances for the optimizer.
     """
 
-    def __init__(self, on_update, on_data_changed=None):
-        super().__init__("Ray Bundle", Bundle, on_update, on_data_changed)
+    def __init__(self, on_update, on_data_changed=None, device=None, dtype=None):
+        super().__init__("Ray Bundle", Bundle, on_update, on_data_changed,
+                         device=device, dtype=dtype)
         self.configs: list = []           # [{'N_rays': int, 'config': {...}}, ...]
         self.bundle_instances: list = []  # [(Bundle, N_rays), ...] — set by _do_build
         self._nrays_tag = f"{self._pfx}__nrays"
@@ -763,7 +860,13 @@ class BundleItemManager(ItemManager):
         errors = []
         for item in self.configs:
             try:
-                bundle = instantiate_from_config(item['config'])
+                bundle = instantiate_from_config(
+                    item['config'], device=self._device, dtype=self._dtype)
+                # RayTransform stores trans/rot_vec as nn.Parameters created on CPU
+                # (no device arg in its __init__). Move the whole module to device
+                # before sampling so all tensors are on the same device.
+                if self._device is not None and isinstance(bundle, nn.Module):
+                    bundle.to(self._device)
                 n = item.get('N_rays', 200)
                 self.bundle_instances.append((bundle, n))
                 rays_list.append(bundle.sample(n))

@@ -24,7 +24,7 @@ import dearpygui.dearpygui as dpg
 
 from ..scene import Scene
 from ..render.camera import Renderer, OrbitCamera
-from ..rays.ray import Rays  # still used for isinstance() check in _run_simulation
+from ..rays.ray import Rays, Paths
 from ..elements.parent import Element
 
 from .forms import ItemManager, BundleItemManager, instantiate_from_config
@@ -46,8 +46,7 @@ _profile_yz: Optional[ProfilePlot] = None
 _element_manager: Optional[ItemManager] = None
 _bundle_manager: Optional[BundleItemManager] = None
 
-_last_sim_rays = None          # Rays after the most recent simulation
-_ray_path_history: list = []   # list of [N,3] CPU tensors captured during sim
+_last_sim_rays = None   # Rays after the most recent simulation
 
 _is_dirty: bool = False
 _current_path: Optional[str] = None
@@ -76,6 +75,7 @@ def _update_scene_rays(_unused_rays_list: list):
     _scene.clear_bundles()
     for bundle, n in _bundle_manager.bundle_instances:
         _scene.add_bundle(bundle, n)
+    _scene.to(_device)          # move bundle nn.Parameters (transform weights) to device
     _scene._build_rays()
     if _scene.rays is not None and hasattr(_scene.rays, 'to'):
         _scene.rays = _scene.rays.to(_device)
@@ -239,11 +239,15 @@ def _show_error(msg: str):
 # ============================================================
 
 def _run_simulation():
-    global _last_sim_rays, _ray_path_history
+    global _last_sim_rays
 
-    if not isinstance(_scene.rays, Rays):
+    # Always start from a fresh sample so repeated runs are independent
+    _scene._build_rays()
+    if _scene.rays is None:
         _show_error("No rays found.\nAdd a bundle in the Rays tab and click UPDATE SCENE.")
         return
+    if _scene.rays is not None and hasattr(_scene.rays, 'to'):
+        _scene.rays = _scene.rays.to(_device)
 
     nbounces = dpg.get_value("nbounces_input")
     _scene.Nbounces = nbounces
@@ -252,18 +256,21 @@ def _run_simulation():
     dpg.set_value("sim_status", "Running...")
     dpg.render_dearpygui_frame()
 
+    paths = None
     try:
-        _scene._build_index_maps()
-        _ray_path_history = [_scene.rays.pos.clone().detach().cpu()]
+        # Wrap rays in a Paths proxy — positions are snapshotted automatically
+        # inside scatter_update() at each bounce, with no extra loop needed.
+        paths = Paths(_scene.rays)
+        _scene.rays = paths
 
+        _scene._build_index_maps()
         for _ in range(nbounces):
             if not (_scene.rays.intensity > 0).any():
                 break
             _scene.step()
-            _ray_path_history.append(_scene.rays.pos.clone().detach().cpu())
 
-        _last_sim_rays = _scene.rays
-        n_active = int((_scene.rays.intensity > 0).sum())
+        _last_sim_rays = paths.unwrap()
+        n_active = int((_last_sim_rays.intensity > 0).sum())
         dpg.set_value("sim_status", f"Done — {n_active} active rays")
 
     except Exception as e:
@@ -272,9 +279,15 @@ def _run_simulation():
         dpg.set_value("sim_status", "Error (see console)")
         _show_error(f"Simulation error:\n{e}")
     finally:
+        # Always restore a plain Rays object so the optimizer and other code
+        # never encounter the Paths wrapper.
+        if paths is not None:
+            _scene.rays = paths.unwrap()
         dpg.configure_item("run_btn", enabled=True)
 
-    _viewport.ray_path_history = _ray_path_history
+    # Hand the recorded history to the viewport for overlay drawing
+    if paths is not None:
+        _viewport.ray_path_history = paths.get_history()
     _refresh_all_views()
     _update_results_panel()
 
@@ -554,6 +567,12 @@ def _build_menu_bar():
             dpg.add_menu_item(label="Save As...", shortcut="Ctrl+Shift+S",
                               callback=lambda: dpg.show_item("dlg_save"))
 
+        # Device indicator — green badge for CUDA, amber for CPU
+        is_cuda = _device is not None and _device.type == "cuda"
+        label  = f"  ● CUDA:{_device.index if _device.index is not None else 0}  " if is_cuda else "  ● CPU  "
+        color  = (80, 220, 100, 255) if is_cuda else (220, 170, 50, 255)
+        dpg.add_text(label, color=color, tag="device_indicator")
+
 
 def _setup_file_dialogs():
     with dpg.file_dialog(show=False, callback=_on_open_selected,
@@ -623,10 +642,14 @@ def run():
         base_cls=Element,
         on_update=_update_scene_elements,
         on_data_changed=_mark_dirty,
+        device=_device,
+        dtype=torch.float32,
     )
     _bundle_manager = BundleItemManager(
         on_update=_update_scene_rays,
         on_data_changed=_mark_dirty,
+        device=_device,
+        dtype=torch.float32,
     )
 
     dpg.create_context()
