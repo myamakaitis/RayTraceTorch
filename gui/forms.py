@@ -286,7 +286,8 @@ class FormBuilder:
                 consumed.add(name)
 
             elif intent == 'DTYPE':
-                dpg.add_combo(["float32", "float64"], label=name, tag=tag,
+                dpg.add_text(name, parent=parent)
+                dpg.add_combo(["float32", "float64"], label=f"##{tag}", tag=tag,
                               parent=parent, width=-1,
                               default_value="float64" if default == torch.float64 else "float32")
                 registry[name] = {'tag': tag, 'intent': 'DTYPE'}
@@ -341,15 +342,17 @@ class FormBuilder:
             else:  # PRIMITIVE
                 val_str = "" if default is None else str(default)
                 if has_grad:
+                    dpg.add_text(name, parent=parent)
                     with dpg.group(horizontal=True, parent=parent):
-                        dpg.add_input_text(label=name, tag=tag,
+                        dpg.add_input_text(label=f"##{tag}", tag=tag,
                                            default_value=val_str, width=120)
                         dpg.add_checkbox(label="grad", tag=g_tag,
                                          default_value=self._is_grad_on(params[grad_partner][1]))
                     registry[grad_partner] = {'tag': g_tag, 'intent': 'BOOL'}
                     consumed.add(grad_partner)
                 else:
-                    dpg.add_input_text(label=name, tag=tag, parent=parent,
+                    dpg.add_text(name, parent=parent)
+                    dpg.add_input_text(label=f"##{tag}", tag=tag, parent=parent,
                                        default_value=val_str, width=-1)
                 registry[name] = {'tag': tag, 'intent': 'PRIMITIVE'}
                 consumed.add(name)

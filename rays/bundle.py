@@ -1,14 +1,15 @@
 import torch
-
+import torch.nn as nn
 from ..geom import RayTransformBundle
 from .ray import Rays
 import torch.nn.functional as F
-from torch.distributions import Uniform
 from typing import Union, Optional
 
-class Bundle:
+class Bundle(nn.Module):
 
     def __init__(self, ray_id: int, device: Union[str, torch.device] = 'cpu', dtype: torch.dtype = torch.float32, transform: Optional[Union[RayTransformBundle, None]] = None):
+
+        super().__init__()
 
         self.ray_id = ray_id
         self.device = device

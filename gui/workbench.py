@@ -24,7 +24,7 @@ import dearpygui.dearpygui as dpg
 
 from ..scene import Scene
 from ..render.camera import Renderer, OrbitCamera
-from ..rays.ray import Rays
+from ..rays.ray import Rays  # still used for isinstance() check in _run_simulation
 from ..elements.parent import Element
 
 from .forms import ItemManager, BundleItemManager, instantiate_from_config
@@ -66,28 +66,19 @@ def _update_scene_elements(new_elements: list):
     _refresh_all_views()
 
 
-def _update_scene_rays(new_rays_list: list):
+def _update_scene_rays(_unused_rays_list: list):
+    """
+    Called by BundleItemManager after UPDATE SCENE.
+    Re-registers all bundles on the scene and rebuilds self.rays via
+    Scene._build_rays() so the scene owns the canonical bundle list.
+    """
     global _scene
-    _scene.clear_rays()
-    if not new_rays_list:
-        return
-
-    # Merge multiple bundles into one Rays object
-    if len(new_rays_list) == 1:
-        merged = new_rays_list[0]
-    else:
-        all_pos = torch.cat([r.pos for r in new_rays_list], dim=0)
-        all_dir = torch.cat([r.dir for r in new_rays_list], dim=0)
-        all_int = torch.cat([r.intensity for r in new_rays_list], dim=0)
-        all_id  = torch.cat([r.id for r in new_rays_list], dim=0)
-        all_wl  = torch.cat([r.wavelength for r in new_rays_list], dim=0)
-        n_total = all_pos.shape[0]
-        merged = Rays(pos=all_pos, dir=all_dir, intensity=all_int,
-                      id=all_id, wavelength=all_wl, batch_size=[n_total])
-
-    if hasattr(merged, 'to'):
-        merged = merged.to(_device)
-    _scene.rays = merged
+    _scene.clear_bundles()
+    for bundle, n in _bundle_manager.bundle_instances:
+        _scene.add_bundle(bundle, n)
+    _scene._build_rays()
+    if _scene.rays is not None and hasattr(_scene.rays, 'to'):
+        _scene.rays = _scene.rays.to(_device)
     _refresh_all_views()
 
 
@@ -132,7 +123,7 @@ def _action_new():
     _bundle_manager.bundle_instances.clear()
     _bundle_manager._refresh_list()
     _scene.clear_elements()
-    _scene.clear_rays()
+    _scene.clear_bundles()
     _scene._build_index_maps()
     _current_path = None
     _is_dirty = False
@@ -349,21 +340,17 @@ def _update_results_panel():
 # ============================================================
 
 def _sample_combined_rays() -> Optional[Rays]:
-    """Sample fresh rays from all bundle instances and merge."""
-    instances = _bundle_manager.bundle_instances
-    if not instances:
+    """
+    Draw a fresh sample from all registered bundles via the scene's
+    _build_rays(), which owns the canonical bundle list.
+    Returns None if no bundles are registered.
+    """
+    if len(_scene.bundles) == 0:
         return None
-    batches = [bundle.sample(n) for bundle, n in instances]
-    if len(batches) == 1:
-        return batches[0]
-    all_pos = torch.cat([r.pos for r in batches], dim=0)
-    all_dir = torch.cat([r.dir for r in batches], dim=0)
-    all_int = torch.cat([r.intensity for r in batches], dim=0)
-    all_id  = torch.cat([r.id for r in batches], dim=0)
-    all_wl  = torch.cat([r.wavelength for r in batches], dim=0)
-    n = all_pos.shape[0]
-    return Rays(pos=all_pos, dir=all_dir, intensity=all_int,
-                id=all_id, wavelength=all_wl, batch_size=[n])
+    _scene._build_rays()
+    if _scene.rays is not None and hasattr(_scene.rays, 'to'):
+        _scene.rays = _scene.rays.to(_device)
+    return _scene.rays
 
 
 def _compute_spot_loss() -> torch.Tensor:
@@ -486,11 +473,31 @@ def _build_optimizer_panel():
     dpg.add_text("",   tag="opt_progress")
 
 
+def _on_ray_vis_changed():
+    _viewport.ray_visible  = dpg.get_value("ray_visible_cb")
+    _viewport.ray_linewidth = dpg.get_value("ray_width_sl")
+    _viewport.ray_opacity  = int(dpg.get_value("ray_opacity_sl"))
+    _viewport.redraw_overlay()
+
+
 def _build_center_panel():
     dpg.add_text(
         "Left-drag: Orbit  |  Mid-drag: Pan  |  Scroll: Zoom  |  Alt+Left: Roll"
     )
     _viewport.build(dpg.last_container())
+
+    dpg.add_spacer(height=4)
+    with dpg.group(horizontal=True):
+        dpg.add_checkbox(label="Show Rays", tag="ray_visible_cb", default_value=True,
+                         callback=lambda s, a: _on_ray_vis_changed())
+        dpg.add_text("  Width")
+        dpg.add_slider_float(label="##ray_width", tag="ray_width_sl",
+                             default_value=1.0, min_value=0.5, max_value=5.0, width=70,
+                             callback=lambda s, a: _on_ray_vis_changed())
+        dpg.add_text("  Opacity")
+        dpg.add_slider_int(label="##ray_opacity", tag="ray_opacity_sl",
+                           default_value=160, min_value=0, max_value=255, width=70,
+                           callback=lambda s, a: _on_ray_vis_changed())
 
     dpg.add_spacer(height=4)
     with dpg.group(horizontal=True):

@@ -49,6 +49,11 @@ class RenderViewport:
         # Ray path history: list of [N, 3] CPU float tensors (one per sim step)
         self.ray_path_history: list = []
 
+        # Ray overlay display settings
+        self.ray_visible: bool = True
+        self.ray_linewidth: float = 1.0
+        self.ray_opacity: int = 160
+
         # DPG tags
         self._tex_tag      = "rtvp__tex"
         self._drawlist_tag = "rtvp__drawlist"
@@ -86,6 +91,10 @@ class RenderViewport:
     # Render
     # ------------------------------------------------------------------
 
+    def redraw_overlay(self):
+        """Redraw just the ray-path overlay without re-rendering the scene."""
+        self._draw_path_overlay()
+
     def refresh(self):
         """Re-render the scene and update the texture + path overlay."""
         try:
@@ -106,7 +115,7 @@ class RenderViewport:
     def _draw_path_overlay(self):
         """Project recorded ray paths into screen space and draw as lines."""
         dpg.delete_item(self._paths_node, children_only=True)
-        if len(self.ray_path_history) < 2:
+        if not self.ray_visible or len(self.ray_path_history) < 2:
             return
 
         # Subsample rays for performance (draw at most 100)
@@ -117,6 +126,8 @@ class RenderViewport:
 
         cam = self._camera
         w, h = self._w, self._h
+        color = (255, 220, 60, int(self.ray_opacity))
+        thickness = float(self.ray_linewidth)
 
         for ri in ray_indices:
             prev_screen = None
@@ -127,8 +138,8 @@ class RenderViewport:
                     if prev_screen is not None:
                         dpg.draw_line(
                             prev_screen, sc,
-                            color=(255, 220, 60, 160),
-                            thickness=1,
+                            color=color,
+                            thickness=thickness,
                             parent=self._paths_node,
                         )
                     prev_screen = sc
