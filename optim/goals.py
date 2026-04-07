@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 from typing import List, Optional
 
+from ..scene import SequentialScene
 from ..rays.ray import Rays
 from ..rays.bundle import Bundle
-
+from ..elements import Sensor
 
 class FocalLengthLoss(nn.Module):
     """
@@ -21,30 +22,25 @@ class FocalLengthLoss(nn.Module):
         f_target: Target effective focal length (positive = converging).
     """
 
-    def __init__(self, scene, f_target: float):
+    def __init__(self, f_target: float):
         super().__init__()
-        self.scene = scene
         self.P_target = nn.Parameter(
             torch.as_tensor(1.0 / f_target), requires_grad=False
         )
 
-    def forward(self):
+    def forward(self, scene: SequentialScene) -> torch.Tensor:
         M = self.scene.getParaxial()
         P_actual = -M[1, 0]
         return (P_actual - self.P_target) ** 2
+
+class SpotTargetLoss(nn.Module):
+
+    def __init(self, sensor, target_rays):
 
 
 class SpotSizeLoss(nn.Module):
     """
     Mean RMS spot-size loss across a set of field bundles.
-
-    Each bundle (a CollimatedDisk or similar) is sampled to produce N_rays
-    rays that are simulated through the scene. The sensor accumulates hit
-    positions tagged by ray ID (one unique ID per bundle). Spot sizes are
-    then computed per-ID using getSpotSizeParallel_xy.
-
-    The sensor is reset at the start of every forward call so that previous
-    simulation runs do not accumulate.
 
     Usage example::
 
@@ -67,41 +63,14 @@ class SpotSizeLoss(nn.Module):
         target_xy: (K, 2) per-bundle target positions.  None → centroid.
     """
 
-    def __init__(self, scene, sensor,
-                 bundles: List[Bundle],
-                 N_rays: int,
-                 target_xy=None):
+    def __init__(self, ray_id: int):
         super().__init__()
-        self.scene     = scene
-        self.sensor    = sensor
-        self.bundles   = bundles
-        self.N_rays    = N_rays
-        self.target_xy = target_xy
 
-    def _build_rays(self) -> Rays:
-        batches = [b.sample(self.N_rays) for b in self.bundles]
+        self.target_id = target_rays
 
-        all_pos = torch.cat([r.pos       for r in batches], dim=0)
-        all_dir = torch.cat([r.dir       for r in batches], dim=0)
-        all_int = torch.cat([r.intensity for r in batches], dim=0)
-        all_id  = torch.cat([r.id        for r in batches], dim=0)
-        all_wl  = torch.cat([r.wavelength for r in batches], dim=0)
 
-        N_total = all_pos.shape[0]
-        return Rays(pos=all_pos, dir=all_dir, intensity=all_int,
-                    id=all_id, wavelength=all_wl, batch_size=[N_total])
+    def forward(self, sensor):
 
-    def forward(self):
-        self.sensor.reset()
-        rays = self._build_rays()
-        self.scene.simulate(rays)
+        
 
-        # query_ids matches the ray_id assigned to each bundle
-        device = rays.pos.device
-        query_ids = torch.tensor(
-            [b.ray_id for b in self.bundles], device=device, dtype=torch.int32
-        )
-        spot_sizes, _ = self.sensor.getSpotSizeParallel_xy(
-            query_ids, target_xy=self.target_xy
-        )
-        return spot_sizes.mean()
+        return

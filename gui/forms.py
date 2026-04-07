@@ -258,6 +258,9 @@ class FormBuilder:
             self._build_params(self._known_classes[class_name],
                                self._form_tag, self._pfx, self._registry, depth=0)
 
+    # Params that are managed globally (device/dtype) and hidden from the form
+    _HIDDEN_PARAMS = frozenset({'device', 'dtype'})
+
     def _build_params(self, cls, parent: str, pfx: str, registry: dict, depth: int):
         if depth > 5:
             dpg.add_text("(max depth reached)", parent=parent)
@@ -267,7 +270,7 @@ class FormBuilder:
         consumed: set = set()
 
         for name, (p_type, default) in params.items():
-            if name in consumed:
+            if name in consumed or name in self._HIDDEN_PARAMS:
                 continue
 
             intent = analyze_type(p_type)
@@ -356,6 +359,13 @@ class FormBuilder:
         """Polymorphic class selector: combo box + rebuilding child window."""
         is_optional = (default is None)
         poly_subs = {c.__name__: c for c in sub_subs}
+        # Also include the base class itself if it's concrete (not abstract)
+        if target_cls.__name__ not in poly_subs and not inspect.isabstract(target_cls):
+            try:
+                inspect.signature(target_cls.__init__)
+                poly_subs[target_cls.__name__] = target_cls
+            except Exception:
+                pass
         sel_tag = f"{pfx}__{name}__sel"
         win_tag = f"{pfx}__{name}__win"
         grp_tag = f"{pfx}__{name}__grp"
@@ -571,17 +581,12 @@ class ItemManager:
     # Build the persistent UI
     # ------------------------------------------------------------------
 
-    def build(self, parent_tag: str):
-        dpg.add_listbox([], label="", tag=self._listbox_tag,
-                        parent=parent_tag, num_items=8, width=-1)
-        with dpg.group(horizontal=True, parent=parent_tag):
-            dpg.add_button(label="Add",    width=65, callback=self._open_add)
-            dpg.add_button(label="Edit",   width=65, callback=self._open_edit)
-            dpg.add_button(label="Delete", width=65, callback=self._do_delete)
-        dpg.add_button(label="UPDATE SCENE", parent=parent_tag, width=-1,
-                       callback=self._do_build)
-
-        # Modal popup — created once, shown/hidden
+    def setup_popup(self):
+        """
+        Create the modal popup window at the top level of the DPG tree.
+        Must be called BEFORE _build_ui() and outside any container context,
+        otherwise DPG parents the window to the active container and segfaults.
+        """
         with dpg.window(label=f"Configure {self._title}", modal=True, show=False,
                         tag=self._popup_tag, width=640, height=710, no_resize=True):
             with dpg.child_window(tag=self._form_area_tag, height=618, border=False):
@@ -592,25 +597,45 @@ class ItemManager:
                 dpg.add_button(label="Cancel", width=90,
                                callback=lambda: dpg.hide_item(self._popup_tag))
 
+    def build(self, parent_tag: str):
+        dpg.add_listbox([], label="", tag=self._listbox_tag,
+                        parent=parent_tag, num_items=8, width=-1)
+        with dpg.group(horizontal=True, parent=parent_tag):
+            dpg.add_button(label="Add",    width=65, callback=self._open_add)
+            dpg.add_button(label="Edit",   width=65, callback=self._open_edit)
+            dpg.add_button(label="Delete", width=65, callback=self._do_delete)
+        dpg.add_button(label="UPDATE SCENE", parent=parent_tag, width=-1,
+                       callback=self._do_build)
+
     # ------------------------------------------------------------------
     # Button callbacks
     # ------------------------------------------------------------------
 
     def _open_add(self):
-        self._editing_idx = -1
-        self._rebuild_popup_form()
-        dpg.show_item(self._popup_tag)
+        try:
+            self._editing_idx = -1
+            self._rebuild_popup_form()
+            dpg.show_item(self._popup_tag)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"[ItemManager] Error opening Add dialog: {e}")
 
     def _open_edit(self):
-        sel = dpg.get_value(self._listbox_tag)
-        labels = self._get_labels()
-        if sel not in labels:
-            return
-        idx = labels.index(sel)
-        self._editing_idx = idx
-        self._rebuild_popup_form()
-        self._active_form.set_values(self.configs[idx]['config'])
-        dpg.show_item(self._popup_tag)
+        try:
+            sel = dpg.get_value(self._listbox_tag)
+            labels = self._get_labels()
+            if sel not in labels:
+                return
+            idx = labels.index(sel)
+            self._editing_idx = idx
+            self._rebuild_popup_form()
+            self._active_form.set_values(self.configs[idx]['config'])
+            dpg.show_item(self._popup_tag)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"[ItemManager] Error opening Edit dialog: {e}")
 
     def _do_delete(self):
         sel = dpg.get_value(self._listbox_tag)

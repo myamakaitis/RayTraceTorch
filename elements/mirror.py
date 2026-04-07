@@ -3,7 +3,7 @@ import torch.nn as nn
 import math
 from typing import Optional, Union
 
-from geom import RayTransform
+from ..geom import RayTransform
 from .parent import Element
 from ..phys import Reflect
 from ..geom import Quadric, QuadricZY, RayTransform

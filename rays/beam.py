@@ -1,13 +1,13 @@
 import torch
 
-from geom import RayTransformBundle
+from ..geom import RayTransformBundle
 from .bundle import Bundle
 from torch.distributions import Normal
 from typing import Optional, Union
 
 class GaussianBeam(Bundle):
 
-    def __init__(self, diameter_1e2_x, diameter_1e2_y,
+    def __init__(self, diameter_1e2_x:float, diameter_1e2_y:float,
             ray_id: int, device: str = 'cpu', dtype: torch.dtype = torch.float32, transform: Optional[Union[RayTransformBundle, None]] = None):
 
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)

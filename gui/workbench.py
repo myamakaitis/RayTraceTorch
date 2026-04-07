@@ -140,35 +140,31 @@ def _action_new():
     _refresh_all_views()
 
 
+def _setup_confirm_discard_popup():
+    """Create the confirm-discard modal at the top level before _build_ui()."""
+    with dpg.window(label="Unsaved Changes", modal=True, show=False,
+                    tag="confirm_discard_popup", width=320, height=110,
+                    no_resize=True):
+        dpg.add_text("Discard unsaved changes?")
+        dpg.add_spacer(height=8)
+        with dpg.group(horizontal=True):
+            dpg.add_button(label="Discard", width=90,
+                           callback=lambda: dpg.set_value("_discard_confirmed", True) or
+                                            dpg.hide_item("confirm_discard_popup"))
+            dpg.add_button(label="Cancel",  width=90,
+                           callback=lambda: dpg.hide_item("confirm_discard_popup"))
+    # Value registry for the confirm result
+    with dpg.value_registry():
+        dpg.add_bool_value(tag="_discard_confirmed", default_value=False)
+
+
 def _confirm_discard() -> bool:
-    """Show a simple modal dialog; returns True if user wants to discard."""
-    # Dear PyGui doesn't have a blocking message box, so we use a small window
-    confirmed = [False]
-
-    def _yes():
-        confirmed[0] = True
-        dpg.hide_item("confirm_discard_popup")
-
-    def _no():
-        dpg.hide_item("confirm_discard_popup")
-
-    if not dpg.does_item_exist("confirm_discard_popup"):
-        with dpg.window(label="Unsaved Changes", modal=True, show=False,
-                        tag="confirm_discard_popup", width=320, height=100,
-                        no_resize=True):
-            dpg.add_text("Discard unsaved changes?")
-            with dpg.group(horizontal=True):
-                dpg.add_button(label="Discard", width=90, callback=_yes)
-                dpg.add_button(label="Cancel",  width=90, callback=_no)
-    else:
-        dpg.configure_item("confirm_discard_popup", show=True)
-
+    """Show the pre-built confirm-discard modal and pump frames until dismissed."""
+    dpg.set_value("_discard_confirmed", False)
     dpg.show_item("confirm_discard_popup")
-    # Pump frames until the user dismisses (blocks within the dpg event loop)
     while dpg.is_item_shown("confirm_discard_popup"):
         dpg.render_dearpygui_frame()
-
-    return confirmed[0]
+    return dpg.get_value("_discard_confirmed")
 
 
 def _on_open_selected(sender, app_data):
@@ -508,8 +504,9 @@ def _build_center_panel():
 def _build_right_panel():
     with dpg.tab_bar():
         with dpg.tab(label="Cross Sections"):
-            _profile_xz.build(dpg.last_item())
-            _profile_yz.build(dpg.last_item())
+            _tab_cs = dpg.last_item()
+            _profile_xz.build(_tab_cs)
+            _profile_yz.build(_tab_cs)
 
         with dpg.tab(label="Results"):
             _build_results_panel()
@@ -536,8 +533,9 @@ def _build_results_panel():
                 dpg.add_text("--", tag=tag)
 
 
-def _setup_menu_bar():
-    with dpg.viewport_menu_bar():
+def _build_menu_bar():
+    """Build a window-level menu bar (not viewport_menu_bar) so it doesn't overlap content."""
+    with dpg.menu_bar():
         with dpg.menu(label="File"):
             dpg.add_menu_item(label="New",        shortcut="Ctrl+N",
                               callback=_action_new)
@@ -565,8 +563,8 @@ def _setup_file_dialogs():
 
 def _build_ui():
     with dpg.window(tag="main_window", no_title_bar=True, no_move=True,
-                    no_resize=True, no_scrollbar=True):
-        dpg.set_primary_window("main_window", True)
+                    no_resize=True, no_scrollbar=True, menubar=True):
+        _build_menu_bar()
 
         with dpg.table(header_row=False, borders_innerV=True, resizable=True,
                        policy=dpg.mvTable_SizingStretchProp):
@@ -629,12 +627,17 @@ def run():
                         width=1600, height=900)
     dpg.setup_dearpygui()
 
-    _setup_menu_bar()
     _setup_file_dialogs()
+    _element_manager.setup_popup()
+    _bundle_manager.setup_popup()
+    _setup_confirm_discard_popup()
     _build_ui()
+    dpg.set_primary_window("main_window", True)   # must be after window is created
     _viewport.register_mouse_handlers()
 
     dpg.show_viewport()
+    _viewport.refresh()          # render background on first frame
+
     dpg.start_dearpygui()
     dpg.destroy_context()
 

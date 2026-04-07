@@ -56,7 +56,6 @@ class RenderViewport:
 
         # Mouse state
         self._prev_mouse: tuple = (0.0, 0.0)
-        self._alt_down: bool = False
 
     # ------------------------------------------------------------------
     # Build
@@ -82,8 +81,6 @@ class RenderViewport:
         with dpg.handler_registry():
             dpg.add_mouse_move_handler(callback=self._on_mouse_move)
             dpg.add_mouse_wheel_handler(callback=self._on_scroll)
-            dpg.add_key_down_handler(dpg.mvKey_Alt, callback=self._on_alt_down)
-            dpg.add_key_release_handler(dpg.mvKey_Alt, callback=self._on_alt_up)
 
     # ------------------------------------------------------------------
     # Render
@@ -182,8 +179,10 @@ class RenderViewport:
 
         left_down   = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
         middle_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Middle)
+        alt_down    = (dpg.is_key_down(dpg.mvKey_LAlt) or
+                       dpg.is_key_down(dpg.mvKey_RAlt))
 
-        if self._alt_down and left_down:
+        if alt_down and left_down:
             self._camera.roll(torch.tensor(dx * self.ROLL_SENS))
             self.refresh()
         elif left_down:
@@ -201,11 +200,7 @@ class RenderViewport:
         self._camera.zoom(torch.tensor(float(app_data) * self.ZOOM_SENS))
         self.refresh()
 
-    def _on_alt_down(self, sender, app_data):
-        self._alt_down = True
 
-    def _on_alt_up(self, sender, app_data):
-        self._alt_down = False
 
 
 # ============================================================
