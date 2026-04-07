@@ -41,7 +41,8 @@ class Rays:
 
     @classmethod
     def initialize(cls, origins, directions, wavelengths=None, intensities=None,
-                   ray_id: int =0, device: str ='cpu', dtype: torch.dtype = torch.float32):
+                   ray_id: int = 0, device: Union[str, torch.device] = 'cpu',
+                   dtype: torch.dtype = torch.float32):
         """
         A factory method to handle your specific initialization logic
         (broadcasting, default values) that acts as your old __init__.
