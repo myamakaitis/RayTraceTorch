@@ -3,16 +3,7 @@ import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
-# Assuming these imports exist in your project structure
-# from my_library import SingletLens, Rays, collimatedSource
+import RayTraceTorch as rtt
 
-from RayTraceTorch.gui import ElementManagerWindow
-
-from PyQt6.QtWidgets import QApplication
-
-
-
-app = QApplication(sys.argv)
-window = ElementManagerWindow()
-window.show()
-sys.exit(app.exec())
+if __name__ == "__main__":
+    rtt.gui.run()

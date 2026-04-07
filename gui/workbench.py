@@ -1,254 +1,643 @@
+"""
+gui/workbench.py
+----------------
+Main Dear PyGui application for the Optical Design Workbench.
+
+Entry point::
+
+    from RayTraceTorch.gui.workbench import run
+    run()
+
+or directly::
+
+    python -m RayTraceTorch.gui.workbench
+"""
+
 import sys
+import os
+from typing import Optional
+
+import numpy as np
 import torch
 import torch.nn as nn
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QListWidget, QPushButton, QSplitter,
-                             QTabWidget, QMessageBox, QLabel, QListWidgetItem)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+import dearpygui.dearpygui as dpg
+
 from ..scene import Scene
+from ..render.camera import Renderer, OrbitCamera
 from ..rays.ray import Rays
-from ..elements import Element
-from ..render.camera import Renderer, Camera, OrbitCamera
-from .camera_pyqt import RenderWidget, ProfileWidget
-from .elementWindow import RecursiveElementDialog
+from ..elements.parent import Element
 
-# ==========================================
-# 3. GENERIC MANAGER WIDGET
-# ==========================================
-class ManagerWidget(QWidget):
-    def __init__(self, title, base_cls, on_update_callback):
-        super().__init__()
-        self.base_cls = base_cls
-        self.on_update_callback = on_update_callback
-        self.configs = []
-
-        layout = QVBoxLayout(self)
-
-        self.list_widget = QListWidget()
-        self.list_widget.itemDoubleClicked.connect(self.edit_item)
-        layout.addWidget(QLabel(f"Active {title}:"))
-        layout.addWidget(self.list_widget)
-
-        btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton("Add")
-        self.add_btn.clicked.connect(self.add_item)
-        self.edit_btn = QPushButton("Edit")
-        self.edit_btn.clicked.connect(self.edit_item)
-        self.del_btn = QPushButton("Del")
-        self.del_btn.clicked.connect(self.remove_item)
-
-        btn_layout.addWidget(self.add_btn)
-        btn_layout.addWidget(self.edit_btn)
-        btn_layout.addWidget(self.del_btn)
-        layout.addLayout(btn_layout)
-
-        self.build_btn = QPushButton(f"UPDATE SCENE")
-        self.build_btn.setStyleSheet("font-weight: bold; padding: 8px; background-color: #d0f0c0; color: black;")
-        self.build_btn.clicked.connect(self.trigger_build)
-        layout.addWidget(self.build_btn)
-
-    def refresh_list(self):
-        self.list_widget.clear()
-        for idx, item in enumerate(self.configs):
-            name = item['config'].get('name') or f"Item_{idx}"
-            cls = item['config']['class']
-            list_item = QListWidgetItem(f"{name} [{cls}]")
-            list_item.setData(Qt.ItemDataRole.UserRole, idx)
-            self.list_widget.addItem(list_item)
-
-    def add_item(self):
-        dlg = RecursiveElementDialog(self, element_base_cls=self.base_cls)
-        dlg.setWindowTitle(f"Configure {self.base_cls.__name__}")
-        if dlg.exec():
-            config = dlg.get_configuration()
-            if not config['name']:
-                config['name'] = f"{config['class']}_{len(self.configs)}"
-            self.configs.append({'config': config})
-            self.refresh_list()
-
-    def edit_item(self):
-        items = self.list_widget.selectedItems()
-        if not items: return
-        idx = items[0].data(Qt.ItemDataRole.UserRole)
-        data = self.configs[idx]
-
-        dlg = RecursiveElementDialog(self, element_base_cls=self.base_cls)
-        dlg.set_configuration(data['config'])
-
-        if dlg.exec():
-            self.configs[idx]['config'] = dlg.get_configuration()
-            self.refresh_list()
-
-    def remove_item(self):
-        items = self.list_widget.selectedItems()
-        if not items: return
-        idx = items[0].data(Qt.ItemDataRole.UserRole)
-        self.configs.pop(idx)
-        self.refresh_list()
-
-    def trigger_build(self):
-        built_objects = []
-        try:
-            for item in self.configs:
-                dlg = RecursiveElementDialog(self, element_base_cls=self.base_cls)
-                dlg.set_configuration(item['config'])
-                obj = dlg.instantiate_current_state()
-                built_objects.append(obj)
-
-            self.on_update_callback(built_objects)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Build Error", f"Failed to instantiate: {str(e)}")
-            import traceback
-            traceback.print_exc()
+from .forms import ItemManager, BundleItemManager, instantiate_from_config
+from .viewport import RenderViewport, ProfilePlot
+from .project import save_project, load_project
 
 
-# ==========================================
-# 4. UNIFIED WORKBENCH WINDOW (New Layout)
-# ==========================================
-class UnifiedWorkbench(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Optical Design Workbench")
-        self.resize(1600, 900)
+# ============================================================
+# Module-level state  (replaces class instance variables)
+# ============================================================
 
-        # 1. Initialize Scene & Device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Workbench Initialized on Device: {self.device}")
+_scene: Optional[Scene] = None
+_device: Optional[torch.device] = None
+_cam: Optional[OrbitCamera] = None
+_renderer: Optional[Renderer] = None
+_viewport: Optional[RenderViewport] = None
+_profile_xz: Optional[ProfilePlot] = None
+_profile_yz: Optional[ProfilePlot] = None
+_element_manager: Optional[ItemManager] = None
+_bundle_manager: Optional[BundleItemManager] = None
 
-        self.scene = Scene()
-        self.scene.to(self.device)  # Initial move
+_last_sim_rays = None          # Rays after the most recent simulation
+_ray_path_history: list = []   # list of [N,3] CPU tensors captured during sim
 
-        # 2. Setup Camera & Renderer
-        self.cam = OrbitCamera(
-            pivot=(0, 0, 0),
-            position=(0, 0, -60),
-            look_at=(0, 0, 0),
-            up_vector=(0, 1, 0),
-            fov_deg=40, width=800, height=800,
-            device=self.device
+_is_dirty: bool = False
+_current_path: Optional[str] = None
+
+
+# ============================================================
+# Scene / Ray callbacks  (called by manager UPDATE SCENE)
+# ============================================================
+
+def _update_scene_elements(new_elements: list):
+    global _scene
+    _scene.clear_elements()
+    _scene.elements.extend(nn.ModuleList(new_elements))
+    _scene.to(_device)
+    _scene._build_index_maps()
+    _refresh_all_views()
+
+
+def _update_scene_rays(new_rays_list: list):
+    global _scene
+    _scene.clear_rays()
+    if not new_rays_list:
+        return
+
+    # Merge multiple bundles into one Rays object
+    if len(new_rays_list) == 1:
+        merged = new_rays_list[0]
+    else:
+        all_pos = torch.cat([r.pos for r in new_rays_list], dim=0)
+        all_dir = torch.cat([r.dir for r in new_rays_list], dim=0)
+        all_int = torch.cat([r.intensity for r in new_rays_list], dim=0)
+        all_id  = torch.cat([r.id for r in new_rays_list], dim=0)
+        all_wl  = torch.cat([r.wavelength for r in new_rays_list], dim=0)
+        n_total = all_pos.shape[0]
+        merged = Rays(pos=all_pos, dir=all_dir, intensity=all_int,
+                      id=all_id, wavelength=all_wl, batch_size=[n_total])
+
+    if hasattr(merged, 'to'):
+        merged = merged.to(_device)
+    _scene.rays = merged
+    _refresh_all_views()
+
+
+# ============================================================
+# View refresh
+# ============================================================
+
+def _refresh_all_views():
+    _viewport.refresh()
+    _profile_xz.update()
+    _profile_yz.update()
+
+
+# ============================================================
+# Dirty tracking
+# ============================================================
+
+def _mark_dirty():
+    global _is_dirty
+    _is_dirty = True
+    _update_viewport_title()
+
+
+def _update_viewport_title():
+    name = os.path.basename(_current_path) if _current_path else "Untitled"
+    suffix = " *" if _is_dirty else ""
+    dpg.set_viewport_title(f"Optical Design Workbench — {name}{suffix}")
+
+
+# ============================================================
+# File operations
+# ============================================================
+
+def _action_new():
+    global _is_dirty, _current_path
+    if _is_dirty:
+        if not _confirm_discard():
+            return
+    _element_manager.configs.clear()
+    _element_manager._refresh_list()
+    _bundle_manager.configs.clear()
+    _bundle_manager.bundle_instances.clear()
+    _bundle_manager._refresh_list()
+    _scene.clear_elements()
+    _scene.clear_rays()
+    _scene._build_index_maps()
+    _current_path = None
+    _is_dirty = False
+    _update_viewport_title()
+    _refresh_all_views()
+
+
+def _confirm_discard() -> bool:
+    """Show a simple modal dialog; returns True if user wants to discard."""
+    # Dear PyGui doesn't have a blocking message box, so we use a small window
+    confirmed = [False]
+
+    def _yes():
+        confirmed[0] = True
+        dpg.hide_item("confirm_discard_popup")
+
+    def _no():
+        dpg.hide_item("confirm_discard_popup")
+
+    if not dpg.does_item_exist("confirm_discard_popup"):
+        with dpg.window(label="Unsaved Changes", modal=True, show=False,
+                        tag="confirm_discard_popup", width=320, height=100,
+                        no_resize=True):
+            dpg.add_text("Discard unsaved changes?")
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Discard", width=90, callback=_yes)
+                dpg.add_button(label="Cancel",  width=90, callback=_no)
+    else:
+        dpg.configure_item("confirm_discard_popup", show=True)
+
+    dpg.show_item("confirm_discard_popup")
+    # Pump frames until the user dismisses (blocks within the dpg event loop)
+    while dpg.is_item_shown("confirm_discard_popup"):
+        dpg.render_dearpygui_frame()
+
+    return confirmed[0]
+
+
+def _on_open_selected(sender, app_data):
+    global _current_path, _is_dirty
+    path = app_data.get('file_path_name', '')
+    if not path or not os.path.isfile(path):
+        return
+    try:
+        data = load_project(path)
+    except Exception as e:
+        _show_error(f"Could not open project:\n{e}")
+        return
+
+    settings = data.get('settings', {})
+    _element_manager.configs = data.get('elements', [])
+    _element_manager._refresh_list()
+    _bundle_manager.configs = data.get('bundles', [])
+    _bundle_manager._refresh_list()
+
+    # Apply settings
+    global _scene
+    _scene.Nbounces = settings.get('Nbounces', 100)
+    if dpg.does_item_exist("nbounces_input"):
+        dpg.set_value("nbounces_input", _scene.Nbounces)
+
+    # Trigger rebuilds so the live scene matches the loaded config
+    _element_manager._do_build()
+    _bundle_manager._do_build()
+
+    _current_path = path
+    _is_dirty = False
+    _update_viewport_title()
+
+
+def _on_save_selected(sender, app_data):
+    global _current_path, _is_dirty
+    path = app_data.get('file_path_name', '')
+    if not path:
+        return
+    if not path.endswith('.rtt'):
+        path += '.rtt'
+    _do_save(path)
+
+
+def _action_save():
+    if _current_path:
+        _do_save(_current_path)
+    else:
+        dpg.show_item("dlg_save")
+
+
+def _do_save(path: str):
+    global _current_path, _is_dirty
+    settings = {
+        'device': str(_device),
+        'Nbounces': int(dpg.get_value("nbounces_input")) if dpg.does_item_exist("nbounces_input") else 100,
+    }
+    try:
+        save_project(path, _element_manager.configs, _bundle_manager.configs, settings)
+        _current_path = path
+        _is_dirty = False
+        _update_viewport_title()
+    except Exception as e:
+        _show_error(f"Could not save project:\n{e}")
+
+
+def _show_error(msg: str):
+    err_tag = "error_popup"
+    if not dpg.does_item_exist(err_tag):
+        with dpg.window(label="Error", modal=True, show=False, tag=err_tag,
+                        width=400, height=150, no_resize=True):
+            dpg.add_text("", tag="error_popup_text", wrap=380)
+            dpg.add_button(label="OK", width=80,
+                           callback=lambda: dpg.hide_item(err_tag))
+    dpg.set_value("error_popup_text", msg)
+    dpg.show_item(err_tag)
+
+
+# ============================================================
+# Simulation
+# ============================================================
+
+def _run_simulation():
+    global _last_sim_rays, _ray_path_history
+
+    if not isinstance(_scene.rays, Rays):
+        _show_error("No rays found.\nAdd a bundle in the Rays tab and click UPDATE SCENE.")
+        return
+
+    nbounces = dpg.get_value("nbounces_input")
+    _scene.Nbounces = nbounces
+
+    dpg.configure_item("run_btn", enabled=False)
+    dpg.set_value("sim_status", "Running...")
+    dpg.render_dearpygui_frame()
+
+    try:
+        _scene._build_index_maps()
+        _ray_path_history = [_scene.rays.pos.clone().detach().cpu()]
+
+        for _ in range(nbounces):
+            if not (_scene.rays.intensity > 0).any():
+                break
+            _scene.step()
+            _ray_path_history.append(_scene.rays.pos.clone().detach().cpu())
+
+        _last_sim_rays = _scene.rays
+        n_active = int((_scene.rays.intensity > 0).sum())
+        dpg.set_value("sim_status", f"Done — {n_active} active rays")
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        dpg.set_value("sim_status", "Error (see console)")
+        _show_error(f"Simulation error:\n{e}")
+    finally:
+        dpg.configure_item("run_btn", enabled=True)
+
+    _viewport.ray_path_history = _ray_path_history
+    _refresh_all_views()
+    _update_results_panel()
+
+
+# ============================================================
+# Results / post-processing
+# ============================================================
+
+def _get_sensor():
+    """Return the first Sensor element in the scene, or None."""
+    for el in _scene.elements:
+        if hasattr(el, 'hitLocs') and el.hitLocs:
+            return el
+    return None
+
+
+def _update_results_panel():
+    if _last_sim_rays is None:
+        return
+
+    sensor = _get_sensor()
+    try:
+        if sensor is not None:
+            locs, intensities, _ = sensor.getHitsTensors()
+            xy = locs[:, :2].detach().cpu().numpy()
+            w  = intensities.detach().cpu().numpy()
+        else:
+            rays = _last_sim_rays
+            with torch.no_grad():
+                active = (rays.intensity > 0).cpu()
+                if not active.any():
+                    return
+                xy = rays.pos[active, :2].cpu().numpy()
+                w  = rays.intensity[active].cpu().numpy()
+
+        if len(w) == 0:
+            return
+
+        # Spot diagram
+        dpg.delete_item("spot_yax", children_only=True)
+        dpg.add_scatter_series(xy[:, 0].tolist(), xy[:, 1].tolist(),
+                               parent="spot_yax")
+        dpg.fit_axis_data("spot_xax")
+        dpg.fit_axis_data("spot_yax")
+
+        # Metrics
+        safe_w = np.where(w > 0, w, 1e-12)
+        cx  = float(np.average(xy[:, 0], weights=safe_w))
+        cy  = float(np.average(xy[:, 1], weights=safe_w))
+        rms = float(np.sqrt(np.average(
+            (xy[:, 0] - cx) ** 2 + (xy[:, 1] - cy) ** 2, weights=safe_w)))
+
+        dpg.set_value("metric_rms",      f"{rms:.5f}")
+        dpg.set_value("metric_centroid", f"({cx:.4f},  {cy:.4f})")
+        dpg.set_value("metric_active",   str(len(w)))
+
+    except Exception as e:
+        print(f"[Results] update error: {e}")
+
+
+# ============================================================
+# Optimizer
+# ============================================================
+
+def _sample_combined_rays() -> Optional[Rays]:
+    """Sample fresh rays from all bundle instances and merge."""
+    instances = _bundle_manager.bundle_instances
+    if not instances:
+        return None
+    batches = [bundle.sample(n) for bundle, n in instances]
+    if len(batches) == 1:
+        return batches[0]
+    all_pos = torch.cat([r.pos for r in batches], dim=0)
+    all_dir = torch.cat([r.dir for r in batches], dim=0)
+    all_int = torch.cat([r.intensity for r in batches], dim=0)
+    all_id  = torch.cat([r.id for r in batches], dim=0)
+    all_wl  = torch.cat([r.wavelength for r in batches], dim=0)
+    n = all_pos.shape[0]
+    return Rays(pos=all_pos, dir=all_dir, intensity=all_int,
+                id=all_id, wavelength=all_wl, batch_size=[n])
+
+
+def _compute_spot_loss() -> torch.Tensor:
+    sensor = _get_sensor()
+    if sensor is not None:
+        sensor.reset()
+
+    rays = _sample_combined_rays()
+    if rays is None:
+        return torch.tensor(0.0)
+
+    rays = rays.to(_device)
+    _scene.rays = rays
+    _scene._build_index_maps()
+
+    for _ in range(_scene.Nbounces):
+        if not (_scene.rays.intensity > 0).any():
+            break
+        _scene.step()
+
+    if sensor is not None and sensor.hitLocs:
+        locs, intensities, _ = sensor.getHitsTensors()
+        xy = locs[:, :2]
+        w  = intensities
+    else:
+        xy = _scene.rays.pos[:, :2]
+        w  = _scene.rays.intensity
+
+    active = w > 0
+    if not active.any():
+        return torch.tensor(0.0, requires_grad=True)
+
+    xy = xy[active]
+    w  = w[active]
+    w_sum = w.sum().clamp(min=1e-12)
+    cx = (xy[:, 0] * w).sum() / w_sum
+    cy = (xy[:, 1] * w).sum() / w_sum
+    rms = torch.sqrt(((xy[:, 0] - cx) ** 2 + (xy[:, 1] - cy) ** 2) * w / w_sum).sum()
+    return rms
+
+
+def _compute_focal_loss(f_target: float) -> torch.Tensor:
+    if not hasattr(_scene, 'getParaxial'):
+        _show_error("FocalLengthLoss requires a SequentialScene with getParaxial().")
+        return torch.tensor(0.0)
+    M = _scene.getParaxial()
+    P_actual = -M[1, 0]
+    P_target = torch.tensor(1.0 / f_target) if f_target != 0 else torch.tensor(0.0)
+    return (P_actual - P_target) ** 2
+
+
+def _run_optimizer():
+    params = [p for p in _scene.parameters() if p.requires_grad]
+    if not params:
+        _show_error(
+            "No optimisable parameters found.\n"
+            "Enable 'grad' checkboxes on element parameters, then click UPDATE SCENE."
         )
-        self.renderer = Renderer(self.scene, background_color=(0.8, 0.8, 0.8))
+        return
 
-        # 3. Main Layout Construction
-        central = QWidget()
-        self.setCentralWidget(central)
+    loss_type = dpg.get_value("opt_loss_type")
+    n_steps   = int(dpg.get_value("opt_steps"))
+    lr        = float(dpg.get_value("opt_lr"))
+    f_target  = float(dpg.get_value("opt_target"))
 
-        # We use a Splitter for resizable columns
-        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        layout = QHBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.main_splitter)
+    optimizer = torch.optim.Adam(params, lr=lr)
+    dpg.configure_item("opt_btn", enabled=False)
 
-        # --- COL 1: MANAGERS (Left) ---
-        self.tabs = QTabWidget()
-        self.tabs.setMinimumWidth(300)
+    for step in range(n_steps):
+        optimizer.zero_grad()
 
-        self.element_manager = ManagerWidget(
-            title="Optical Elements",
-            base_cls=Element,
-            on_update_callback=self.update_scene_elements
-        )
-        self.tabs.addTab(self.element_manager, "Elements")
+        if loss_type == "SpotSizeLoss":
+            loss = _compute_spot_loss()
+        else:
+            loss = _compute_focal_loss(f_target)
 
-        self.bundle_manager = ManagerWidget(
-            title="Ray Bundles",
-            base_cls=Rays,
-            on_update_callback=self.update_scene_rays
-        )
-        self.tabs.addTab(self.bundle_manager, "Rays")
+        if loss.requires_grad:
+            loss.backward()
+            optimizer.step()
 
-        self.main_splitter.addWidget(self.tabs)
+        loss_val = loss.item()
+        dpg.set_value("opt_loss_display", f"Loss: {loss_val:.7f}")
+        dpg.set_value("opt_progress",     f"Step {step + 1} / {n_steps}")
+        dpg.render_dearpygui_frame()
 
-        # --- COL 2: 3D RENDER (Center) ---
-        self.render_container = QWidget()
-        rc_layout = QVBoxLayout(self.render_container)
-        rc_layout.setContentsMargins(0, 0, 0, 0)
-        rc_layout.addWidget(QLabel("<b>3D Interactive View</b>"))
+    dpg.configure_item("opt_btn", enabled=True)
+    _refresh_all_views()
 
-        self.render_widget = RenderWidget(self.renderer, self.cam)
-        rc_layout.addWidget(self.render_widget)
 
-        self.main_splitter.addWidget(self.render_container)
+# ============================================================
+# UI construction
+# ============================================================
 
-        # --- COL 3: CROSS SECTIONS (Right) ---
-        self.profiles_container = QWidget()
-        pc_layout = QVBoxLayout(self.profiles_container)
-        pc_layout.setContentsMargins(0, 0, 0, 0)
-        pc_layout.setSpacing(10)
+def _build_left_panel():
+    with dpg.tab_bar():
+        with dpg.tab(label="Elements"):
+            _element_manager.build(dpg.last_item())
 
-        # XZ View (Top)
-        self.profile_xz = ProfileWidget(self.renderer, self.scene, axis='x')
-        pc_layout.addWidget(self.profile_xz)
+        with dpg.tab(label="Rays"):
+            _bundle_manager.build(dpg.last_item())
 
-        # YZ View (Bottom)
-        self.profile_yz = ProfileWidget(self.renderer, self.scene, axis='y')
-        pc_layout.addWidget(self.profile_yz)
+        with dpg.tab(label="Optimize"):
+            _build_optimizer_panel()
 
-        self.main_splitter.addWidget(self.profiles_container)
 
-        # Set Stretch Factors to ensure visibility
-        # Manager : 3D View : Profiles
-        self.main_splitter.setStretchFactor(0, 1)
-        self.main_splitter.setStretchFactor(1, 4)
-        self.main_splitter.setStretchFactor(2, 2)
-    # --- Callbacks ---
+def _build_optimizer_panel():
+    dpg.add_combo(["SpotSizeLoss", "FocalLengthLoss"],
+                  label="Loss function", tag="opt_loss_type",
+                  default_value="SpotSizeLoss", width=-1)
+    dpg.add_input_double(label="Target value (f for FocalLength)",
+                         tag="opt_target", default_value=50.0, width=-1)
+    dpg.add_input_int(label="Steps",        tag="opt_steps",
+                      default_value=50, min_value=1, width=100)
+    dpg.add_input_float(label="Learn rate",  tag="opt_lr",
+                        default_value=0.001, format="%.5f", width=100)
+    dpg.add_button(label="Run Optimizer", tag="opt_btn",
+                   width=-1, callback=_run_optimizer)
+    dpg.add_separator()
+    dpg.add_text("--", tag="opt_loss_display")
+    dpg.add_text("",   tag="opt_progress")
 
-    def update_scene_elements(self, new_elements):
-        print(f"Updating Scene with {len(new_elements)} elements on {self.device}...")
 
-        self.scene.clear_elements()
-        self.scene.elements.extend(nn.ModuleList(new_elements))
+def _build_center_panel():
+    dpg.add_text(
+        "Left-drag: Orbit  |  Mid-drag: Pan  |  Scroll: Zoom  |  Alt+Left: Roll"
+    )
+    _viewport.build(dpg.last_container())
 
-        # CRITICAL: Move scene to GPU *before* rebuilding maps
-        self.scene.to(self.device)
+    dpg.add_spacer(height=4)
+    with dpg.group(horizontal=True):
+        dpg.add_input_int(label="Bounces", tag="nbounces_input",
+                          default_value=100, min_value=1, max_value=10_000, width=80)
+        dpg.add_button(label="Run Simulation", tag="run_btn",
+                       callback=_run_simulation)
+        dpg.add_text("Ready", tag="sim_status")
 
-        # Rebuild maps (now that elements are on GPU, maps will be created on GPU)
-        self.scene._build_index_maps()
 
-        self.refresh_all_views()
+def _build_right_panel():
+    with dpg.tab_bar():
+        with dpg.tab(label="Cross Sections"):
+            _profile_xz.build(dpg.last_item())
+            _profile_yz.build(dpg.last_item())
 
-    def update_scene_rays(self, new_bundles):
-        print(f"Updating Scene with {len(new_bundles)} ray bundles...")
+        with dpg.tab(label="Results"):
+            _build_results_panel()
 
-        self.scene.clear_rays()
-        if len(new_bundles) > 0:
-            # Assuming single bundle for now
-            self.scene.rays = new_bundles[0]
 
-            # Ensure rays are on correct device
-            if hasattr(self.scene.rays, 'to'):
-                self.scene.rays = self.scene.rays.to(self.device)
+def _build_results_panel():
+    with dpg.plot(label="Spot Diagram", height=260, width=-1,
+                  tag="spot_plot", equal_aspects=True):
+        dpg.add_plot_axis(dpg.mvXAxis, label="X", tag="spot_xax")
+        dpg.add_plot_axis(dpg.mvYAxis, label="Y", tag="spot_yax")
 
-        # Scene is already on device, but ensure consistency
-        self.scene.to(self.device)
+    dpg.add_separator()
+    dpg.add_text("Metrics", color=(180, 180, 180, 255))
+    with dpg.table(header_row=False, borders_innerV=True):
+        dpg.add_table_column(init_width_or_weight=0.55)
+        dpg.add_table_column(init_width_or_weight=0.45)
+        for label, tag in [
+            ("RMS Spot Radius", "metric_rms"),
+            ("Centroid (x, y)", "metric_centroid"),
+            ("Active Rays",     "metric_active"),
+        ]:
+            with dpg.table_row():
+                dpg.add_text(label)
+                dpg.add_text("--", tag=tag)
 
-        self.refresh_all_views()
 
-    def refresh_all_views(self):
-        """Forces a repaint of 3D and Profile widgets."""
-        self.render_widget.refresh_render()
-        self.profile_xz.update_data()
-        self.profile_yz.update_data()
+def _setup_menu_bar():
+    with dpg.viewport_menu_bar():
+        with dpg.menu(label="File"):
+            dpg.add_menu_item(label="New",        shortcut="Ctrl+N",
+                              callback=_action_new)
+            dpg.add_menu_item(label="Open...",    shortcut="Ctrl+O",
+                              callback=lambda: dpg.show_item("dlg_open"))
+            dpg.add_separator()
+            dpg.add_menu_item(label="Save",       shortcut="Ctrl+S",
+                              callback=_action_save)
+            dpg.add_menu_item(label="Save As...", shortcut="Ctrl+Shift+S",
+                              callback=lambda: dpg.show_item("dlg_save"))
+
+
+def _setup_file_dialogs():
+    with dpg.file_dialog(show=False, callback=_on_open_selected,
+                         tag="dlg_open", width=720, height=460,
+                         file_count=1):
+        dpg.add_file_extension(".rtt", color=(255, 220, 50, 255),
+                               custom_text="[RTT Project]")
+
+    with dpg.file_dialog(show=False, callback=_on_save_selected,
+                         tag="dlg_save", width=720, height=460):
+        dpg.add_file_extension(".rtt", color=(255, 220, 50, 255),
+                               custom_text="[RTT Project]")
+
+
+def _build_ui():
+    with dpg.window(tag="main_window", no_title_bar=True, no_move=True,
+                    no_resize=True, no_scrollbar=True):
+        dpg.set_primary_window("main_window", True)
+
+        with dpg.table(header_row=False, borders_innerV=True, resizable=True,
+                       policy=dpg.mvTable_SizingStretchProp):
+            dpg.add_table_column(init_width_or_weight=0.22)
+            dpg.add_table_column(init_width_or_weight=0.52)
+            dpg.add_table_column(init_width_or_weight=0.26)
+
+            with dpg.table_row():
+                with dpg.table_cell():
+                    _build_left_panel()
+                with dpg.table_cell():
+                    _build_center_panel()
+                with dpg.table_cell():
+                    _build_right_panel()
+
+
+# ============================================================
+# Entry point
+# ============================================================
+
+def run():
+    global _scene, _device, _cam, _renderer, _viewport
+    global _profile_xz, _profile_yz
+    global _element_manager, _bundle_manager
+
+    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[Workbench] device: {_device}")
+
+    _scene = Scene()
+    _scene.to(_device)
+
+    _cam = OrbitCamera(
+        pivot=(0, 0, 0),
+        position=(0, 0, -60),
+        look_at=(0, 0, 0),
+        up_vector=(0, 1, 0),
+        fov_deg=40,
+        width=800,
+        height=800,
+        device=_device,
+    )
+    _renderer = Renderer(_scene, background_color=(0.12, 0.12, 0.12))
+    _viewport  = RenderViewport(_renderer, _cam, width=800, height=800)
+    _profile_xz = ProfilePlot(_renderer, _scene, axis='x')
+    _profile_yz = ProfilePlot(_renderer, _scene, axis='y')
+
+    _element_manager = ItemManager(
+        title="Optical Element",
+        base_cls=Element,
+        on_update=_update_scene_elements,
+        on_data_changed=_mark_dirty,
+    )
+    _bundle_manager = BundleItemManager(
+        on_update=_update_scene_rays,
+        on_data_changed=_mark_dirty,
+    )
+
+    dpg.create_context()
+    dpg.create_viewport(title="Optical Design Workbench — Untitled",
+                        width=1600, height=900)
+    dpg.setup_dearpygui()
+
+    _setup_menu_bar()
+    _setup_file_dialogs()
+    _build_ui()
+    _viewport.register_mouse_handlers()
+
+    dpg.show_viewport()
+    dpg.start_dearpygui()
+    dpg.destroy_context()
 
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-
-    app.setStyle("Fusion")
-    palette = app.palette()
-    palette.setColor(palette.ColorRole.Window, QColor(30, 30, 30))
-    palette.setColor(palette.ColorRole.WindowText, Qt.GlobalColor.white)
-    palette.setColor(palette.ColorRole.Base, QColor(15, 15, 15))
-    palette.setColor(palette.ColorRole.AlternateBase, QColor(45, 45, 45))
-    palette.setColor(palette.ColorRole.Button, QColor(45, 45, 45))
-    palette.setColor(palette.ColorRole.ButtonText, Qt.GlobalColor.white)
-    palette.setColor(palette.ColorRole.BrightText, Qt.GlobalColor.red)
-    palette.setColor(palette.ColorRole.Highlight, QColor(100, 100, 225))
-    palette.setColor(palette.ColorRole.HighlightedText, Qt.GlobalColor.black)
-    app.setPalette(palette)
-
-    window = UnifiedWorkbench()
-    window.show()
-    sys.exit(app.exec())
+    run()

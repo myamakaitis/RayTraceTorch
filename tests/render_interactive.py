@@ -23,9 +23,8 @@ def render():
     scene1 = rtt.scene.Scene()
     scene1.elements.extend([element1, element2, element3])
     scene1._build_index_maps()
-    scene1.to('cuda')
 
-    rtt.gui.run_gui(scene1)
+    rtt.gui.run()
 
 if __name__ == '__main__':
     render()
