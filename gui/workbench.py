@@ -246,6 +246,20 @@ def _show_error(msg: str):
 # Simulation
 # ============================================================
 
+def _reset_sensors():
+    """Call reset() on every sensor in the scene and clear the results display."""
+    for el in _scene.elements:
+        if hasattr(el, 'reset'):
+            el.reset()
+    # Clear the spot diagram and metrics
+    if dpg.does_item_exist("spot_yax"):
+        dpg.delete_item("spot_yax", children_only=True)
+    for tag in ("metric_rms", "metric_centroid", "metric_active"):
+        if dpg.does_item_exist(tag):
+            dpg.set_value(tag, "--")
+    dpg.set_value("sim_status", "Sensor reset")
+
+
 def _run_simulation():
     global _last_sim_rays
 
@@ -653,6 +667,7 @@ def _build_center_panel():
                           default_value=100, min_value=1, max_value=10_000, width=80)
         dpg.add_button(label="Run Simulation", tag="run_btn",
                        callback=_run_simulation)
+        dpg.add_button(label="Reset Sensor", callback=_reset_sensors)
         dpg.add_text("Ready", tag="sim_status")
 
 
