@@ -51,6 +51,13 @@ _last_sim_rays = None   # Rays after the most recent simulation
 _is_dirty: bool = False
 _current_path: Optional[str] = None
 
+# Tracks which plot tags currently have equal_aspects=True so the toggle
+# button can flip the state without querying DPG (no getter for this flag).
+# spot_plot is built with equal_aspects=True; cross-section plots start False.
+_equal_aspects_plots: set = {"spot_plot"}
+
+_SPOT_THEME_TAG = "spot_scatter_theme"   # DPG theme item for scatter markers
+
 
 # ============================================================
 # Scene / Ray callbacks  (called by manager UPDATE SCENE)
@@ -79,6 +86,7 @@ def _update_scene_rays(_unused_rays_list: list):
     _scene._build_rays()
     if _scene.rays is not None and hasattr(_scene.rays, 'to'):
         _scene.rays = _scene.rays.to(_device)
+    _refresh_spot_id_combo()    # keep ray-ID filter in sync with registered bundles
     _refresh_all_views()
 
 
@@ -296,6 +304,77 @@ def _run_simulation():
 # Results / post-processing
 # ============================================================
 
+# ------------------------------------------------------------------
+# Plot helpers
+# ------------------------------------------------------------------
+
+def _toggle_plot_equal(plot_tag: str, btn_tag: str):
+    """Toggle equal_aspects on a DPG plot and update the button label."""
+    global _equal_aspects_plots
+    currently_equal = plot_tag in _equal_aspects_plots
+    new_val = not currently_equal
+    try:
+        dpg.configure_item(plot_tag, equal_aspects=new_val)
+    except Exception:
+        pass
+    if new_val:
+        _equal_aspects_plots.add(plot_tag)
+    else:
+        _equal_aspects_plots.discard(plot_tag)
+    dpg.configure_item(btn_tag, label="[1:1]" if new_val else "1:1")
+
+
+def _apply_spot_scatter_theme(series_tag: int, marker_size: float, opacity: int):
+    """Create/refresh the DPG theme that controls scatter marker size and opacity."""
+    if dpg.does_item_exist(_SPOT_THEME_TAG):
+        dpg.delete_item(_SPOT_THEME_TAG)
+    with dpg.theme(tag=_SPOT_THEME_TAG):
+        with dpg.theme_component(dpg.mvScatterSeries):
+            dpg.add_theme_style(dpg.mvPlotStyleVar_MarkerSize, marker_size,
+                                category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_color(dpg.mvPlotCol_MarkerFill,
+                                (255, 200, 80, opacity),
+                                category=dpg.mvThemeCat_Plots)
+            dpg.add_theme_color(dpg.mvPlotCol_MarkerOutline,
+                                (255, 200, 80, opacity),
+                                category=dpg.mvThemeCat_Plots)
+    dpg.bind_item_theme(series_tag, _SPOT_THEME_TAG)
+
+
+def _get_available_ray_ids() -> list:
+    """Collect unique ray_id values from all registered bundles."""
+    ids = ["All"]
+    seen: set = set()
+    for bundle, _ in _bundle_manager.bundle_instances:
+        rid = getattr(bundle, 'ray_id', None)
+        if rid is not None and rid not in seen:
+            ids.append(str(rid))
+            seen.add(rid)
+    return ids
+
+
+def _refresh_spot_id_combo():
+    """Update the ray-ID filter combo to reflect the current bundle list."""
+    if not dpg.does_item_exist("spot_ray_id"):
+        return
+    items = _get_available_ray_ids()
+    dpg.configure_item("spot_ray_id", items=items)
+    cur = dpg.get_value("spot_ray_id")
+    if cur not in items:
+        dpg.set_value("spot_ray_id", "All")
+
+
+def _on_spot_mode_changed(sender, app_data):
+    is_scatter = (app_data == "Scatter")
+    if is_scatter:
+        dpg.show_item("scatter_ctrl_grp")
+        dpg.hide_item("raster_ctrl_grp")
+    else:
+        dpg.hide_item("scatter_ctrl_grp")
+        dpg.show_item("raster_ctrl_grp")
+    _update_results_panel()
+
+
 def _get_sensor():
     """Return the first Sensor element in the scene, or None."""
     for el in _scene.elements:
@@ -311,41 +390,90 @@ def _update_results_panel():
     sensor = _get_sensor()
     try:
         if sensor is not None:
-            locs, intensities, _ = sensor.getHitsTensors()
-            xy = locs[:, :2].detach().cpu().numpy()
-            w  = intensities.detach().cpu().numpy()
+            locs, intensities, ids_t = sensor.getHitsTensors()
+            xy     = locs[:, :2].detach().cpu().numpy()
+            w      = intensities.detach().cpu().numpy()
+            ids_np = ids_t.detach().cpu().numpy()
         else:
             rays = _last_sim_rays
             with torch.no_grad():
                 active = (rays.intensity > 0).cpu()
                 if not active.any():
                     return
-                xy = rays.pos[active, :2].cpu().numpy()
-                w  = rays.intensity[active].cpu().numpy()
+                xy     = rays.pos[active, :2].cpu().numpy()
+                w      = rays.intensity[active].cpu().numpy()
+                ids_np = rays.id[active].cpu().numpy()
+    except Exception as e:
+        print(f"[Results] data error: {e}")
+        return
 
-        if len(w) == 0:
-            return
+    if len(w) == 0:
+        return
 
-        # Spot diagram
-        dpg.delete_item("spot_yax", children_only=True)
-        dpg.add_scatter_series(xy[:, 0].tolist(), xy[:, 1].tolist(),
-                               parent="spot_yax")
+    # ---- Ray-ID filter ----
+    ray_id_str = dpg.get_value("spot_ray_id") if dpg.does_item_exist("spot_ray_id") else "All"
+    if ray_id_str != "All":
+        try:
+            rid  = int(ray_id_str)
+            mask = (ids_np == rid)
+            xy     = xy[mask]
+            w      = w[mask]
+            ids_np = ids_np[mask]
+        except (ValueError, TypeError):
+            pass
+
+    if len(w) == 0:
+        dpg.set_value("metric_active", "0 (no hits for this ID)")
+        return
+
+    mode = dpg.get_value("spot_mode") if dpg.does_item_exist("spot_mode") else "Scatter"
+    dpg.delete_item("spot_yax", children_only=True)
+
+    if mode == "Scatter":
+        size    = float(dpg.get_value("spot_size_sl"))    if dpg.does_item_exist("spot_size_sl")    else 3.0
+        opacity = int(dpg.get_value("spot_opacity_sl"))   if dpg.does_item_exist("spot_opacity_sl") else 180
+        series_tag = dpg.add_scatter_series(xy[:, 0].tolist(), xy[:, 1].tolist(),
+                                            parent="spot_yax")
+        _apply_spot_scatter_theme(series_tag, size, opacity)
+        dpg.set_axis_limits_auto("spot_xax")
+        dpg.set_axis_limits_auto("spot_yax")
         dpg.fit_axis_data("spot_xax")
         dpg.fit_axis_data("spot_yax")
+    else:  # Raster / histogram
+        n_bins = int(dpg.get_value("spot_bins_sl")) if dpg.does_item_exist("spot_bins_sl") else 64
+        xmin, xmax = float(xy[:, 0].min()), float(xy[:, 0].max())
+        ymin, ymax = float(xy[:, 1].min()), float(xy[:, 1].max())
+        px = max((xmax - xmin) * 0.05, 1e-6)
+        py = max((ymax - ymin) * 0.05, 1e-6)
+        xmin -= px;  xmax += px
+        ymin -= py;  ymax += py
+        hist, _, _ = np.histogram2d(xy[:, 0], xy[:, 1], bins=n_bins,
+                                    range=[[xmin, xmax], [ymin, ymax]], weights=w)
+        # DPG heat_series is row-major (row=Y, col=X) → transpose numpy's (X,Y) array
+        scale_max = float(hist.max()) if hist.max() > 0 else 1.0
+        dpg.add_heat_series(hist.T.flatten().tolist(),
+                            rows=n_bins, cols=n_bins,
+                            scale_min=0.0, scale_max=scale_max,
+                            bounds_min=(xmin, ymin), bounds_max=(xmax, ymax),
+                            format="",          # suppress per-cell value labels
+                            parent="spot_yax", label="Density")
+        try:
+            dpg.bind_colormap("spot_plot", dpg.mvPlotColormap_Hot)
+        except Exception:
+            pass
+        dpg.set_axis_limits("spot_xax", xmin, xmax)
+        dpg.set_axis_limits("spot_yax", ymin, ymax)
 
-        # Metrics
-        safe_w = np.where(w > 0, w, 1e-12)
-        cx  = float(np.average(xy[:, 0], weights=safe_w))
-        cy  = float(np.average(xy[:, 1], weights=safe_w))
-        rms = float(np.sqrt(np.average(
-            (xy[:, 0] - cx) ** 2 + (xy[:, 1] - cy) ** 2, weights=safe_w)))
+    # ---- Metrics ----
+    safe_w = np.where(w > 0, w, 1e-12)
+    cx  = float(np.average(xy[:, 0], weights=safe_w))
+    cy  = float(np.average(xy[:, 1], weights=safe_w))
+    rms = float(np.sqrt(np.average(
+        (xy[:, 0] - cx) ** 2 + (xy[:, 1] - cy) ** 2, weights=safe_w)))
 
-        dpg.set_value("metric_rms",      f"{rms:.5f}")
-        dpg.set_value("metric_centroid", f"({cx:.4f},  {cy:.4f})")
-        dpg.set_value("metric_active",   str(len(w)))
-
-    except Exception as e:
-        print(f"[Results] update error: {e}")
+    dpg.set_value("metric_rms",      f"{rms:.5f}")
+    dpg.set_value("metric_centroid", f"({cx:.4f},  {cy:.4f})")
+    dpg.set_value("metric_active",   str(len(w)))
 
 
 # ============================================================
@@ -493,6 +621,12 @@ def _on_ray_vis_changed():
     _viewport.redraw_overlay()
 
 
+def _clear_ray_overlay():
+    """Erase the stored ray path history and remove all overlay lines."""
+    _viewport.ray_path_history = []
+    _viewport.redraw_overlay()
+
+
 def _build_center_panel():
     dpg.add_text(
         "Left-drag: Orbit  |  Mid-drag: Pan  |  Scroll: Zoom  |  Alt+Left: Roll"
@@ -511,6 +645,7 @@ def _build_center_panel():
         dpg.add_slider_int(label="##ray_opacity", tag="ray_opacity_sl",
                            default_value=160, min_value=0, max_value=255, width=70,
                            callback=lambda s, a: _on_ray_vis_changed())
+        dpg.add_button(label="Clear", callback=_clear_ray_overlay)
 
     dpg.add_spacer(height=4)
     with dpg.group(horizontal=True):
@@ -526,18 +661,58 @@ def _build_right_panel():
         with dpg.tab(label="Cross Sections"):
             _tab_cs = dpg.last_item()
             _profile_xz.build(_tab_cs)
+            dpg.add_button(label="1:1", tag="xz_equal_btn",
+                           callback=lambda: _toggle_plot_equal("profile_plot_x",
+                                                               "xz_equal_btn"))
             _profile_yz.build(_tab_cs)
+            dpg.add_button(label="1:1", tag="yz_equal_btn",
+                           callback=lambda: _toggle_plot_equal("profile_plot_y",
+                                                               "yz_equal_btn"))
 
         with dpg.tab(label="Results"):
             _build_results_panel()
 
 
 def _build_results_panel():
-    with dpg.plot(label="Spot Diagram", height=260, width=-1,
+    # ---- Controls row 1: mode selector, ray-ID filter, 1:1 toggle ----
+    with dpg.group(horizontal=True):
+        dpg.add_combo(["Scatter", "Raster"], default_value="Scatter",
+                      label="##spot_mode", tag="spot_mode", width=80,
+                      callback=_on_spot_mode_changed)
+        dpg.add_text("  ID:")
+        dpg.add_combo(["All"], default_value="All",
+                      label="##spot_ray_id", tag="spot_ray_id", width=55,
+                      callback=lambda s, a: _update_results_panel())
+        dpg.add_button(label="[1:1]", tag="spot_equal_btn",
+                       callback=lambda: _toggle_plot_equal("spot_plot", "spot_equal_btn"))
+
+    # ---- Controls row 2a: scatter-specific (size + opacity) ----
+    with dpg.group(tag="scatter_ctrl_grp", horizontal=False):
+        with dpg.group(horizontal=True):
+            dpg.add_text("Size:")
+            dpg.add_slider_float(label="##spot_size", tag="spot_size_sl",
+                                 default_value=3.0, min_value=0.5, max_value=15.0,
+                                 width=70, callback=lambda s, a: _update_results_panel())
+            dpg.add_text("  Opacity:")
+            dpg.add_slider_int(label="##spot_opacity", tag="spot_opacity_sl",
+                               default_value=180, min_value=10, max_value=255,
+                               width=70, callback=lambda s, a: _update_results_panel())
+
+    # ---- Controls row 2b: raster-specific (bin count) ----
+    with dpg.group(tag="raster_ctrl_grp", horizontal=False, show=False):
+        with dpg.group(horizontal=True):
+            dpg.add_text("Bins:")
+            dpg.add_slider_int(label="##spot_bins", tag="spot_bins_sl",
+                               default_value=64, min_value=8, max_value=512,
+                               width=120, callback=lambda s, a: _update_results_panel())
+
+    # ---- Spot diagram plot ----
+    with dpg.plot(label="Spot Diagram", height=280, width=-1,
                   tag="spot_plot", equal_aspects=True):
         dpg.add_plot_axis(dpg.mvXAxis, label="X", tag="spot_xax")
         dpg.add_plot_axis(dpg.mvYAxis, label="Y", tag="spot_yax")
 
+    # ---- Metrics ----
     dpg.add_separator()
     dpg.add_text("Metrics", color=(180, 180, 180, 255))
     with dpg.table(header_row=False, borders_innerV=True):

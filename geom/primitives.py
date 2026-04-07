@@ -75,10 +75,15 @@ class Surface(nn.Module):
 
         t = self._check_t(t_list, local_pos, local_dir)
 
-        # 3. Compute Global Hit Point
-        # P_hit = P_origin + t * Direction
+        # 3. Compute Hit Points
+        # Global:  P_hit_global = P_global_origin + t * dir_global
+        # Local:   P_hit_local  = P_local_origin  + t * dir_local
+        # hit_local MUST use local_pos (not rays.pos) so that inBounds checks
+        # and normal calculations operate in the correct coordinate frame.
+        # Using rays.pos here would mix global origin with local direction,
+        # producing wrong x,y coordinates whenever the surface is translated.
         hit_global = rays.pos + t.unsqueeze(1) * rays.dir
-        hit_local = rays.pos + t.unsqueeze(1) * local_dir
+        hit_local  = local_pos + t.unsqueeze(1) * local_dir
 
         # 4
         normal_local = self._getNormal(hit_local)
