@@ -43,9 +43,26 @@ class Sensor(Element):
         self.hitIntensity = []
         self.hitID        = []
 
-    def getHitsTensors(self):
+    def getHitsTensors(self, ray_id=None):
+        """
+        Return (locs, intensities, ids) tensors for all recorded hits.
 
-        return torch.cat(self.hitLocs, dim=0), torch.cat(self.hitIntensity, dim=0), torch.cat(self.hitID, dim=0),
+        Parameters
+        ----------
+        ray_id : int or None
+            If given, only hits whose ``id`` matches ``ray_id`` are returned.
+            Useful both for display filtering and for constructing per-bundle
+            optimization loss functions.
+        """
+        locs        = torch.cat(self.hitLocs,      dim=0)
+        intensities = torch.cat(self.hitIntensity, dim=0)
+        ids         = torch.cat(self.hitID,        dim=0)
+        if ray_id is not None:
+            mask        = (ids == int(ray_id))
+            locs        = locs[mask]
+            intensities = intensities[mask]
+            ids         = ids[mask]
+        return locs, intensities, ids
 
     def getSpotSizeID_xy(self, ray_id, target_xy = None, norm_ord = 2):
 

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from typing import Optional, Union
 
-from geom import RayTransform
+from ..geom import RayTransform
 from .parent import Element
 from ..phys import RefractSnell, RefractFresnel, Block
 from ..geom import Singlet, CylSinglet, Doublet, Triplet
