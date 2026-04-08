@@ -190,56 +190,68 @@ class Renderer:
 
     def render_3d(self, camera):
         """
-        Performs a single-bounce ray cast using the Scene's shared logic.
+        Performs a single-bounce ray cast, excluding aperture elements entirely
+        so they cannot occlude optical elements behind them.
         """
         self.scene._build_index_maps()
         rays = camera.generate_rays()
-
-        # 1. Use Shared Scene Logic
-        # This returns ONLY the geometry hits, ignoring ray intensity
-        result = self.scene.ray_cast(rays)
-
-        # Default Background
         pixel_colors = self.bg_color.expand(rays.batch_size[0], 3).clone()
 
-        if result is None:
+        # Apertures must be excluded at the distance-check level.
+        # Filtering them only in the colouring step is too late — they would
+        # still win the closest-hit competition and hide everything behind them.
+        def _is_aperture(el):
+            return any('ApertureFilter' in type(f).__name__ or 'Fuzzy' in type(f).__name__
+                       for f in el.surface_functions)
+
+        renderable = [(k, el) for k, el in enumerate(self.scene.elements)
+                      if not _is_aperture(el)]
+
+        if not renderable:
             return pixel_colors.reshape(camera.height, camera.width, 3).cpu()
 
-        hit_mask, winner_elem_ids, winner_surf_ids = result
+        # Build a distance table from only the renderable elements and keep a
+        # mapping from each column back to (element_index, surface_index).
+        with torch.no_grad():
+            t_blocks      = []
+            local_elem_ids = []
+            local_surf_ids = []
+            for k, el in renderable:
+                t_block = el.intersectTest(rays)          # [N, n_surfs]
+                t_blocks.append(t_block)
+                for s in range(t_block.shape[1]):
+                    local_elem_ids.append(k)
+                    local_surf_ids.append(s)
+
+            t_matrix = torch.cat(t_blocks, dim=1)         # [N, total_renderable_surfs]
+            dev      = t_matrix.device
+            elem_id_t = torch.tensor(local_elem_ids, dtype=torch.long, device=dev)
+            surf_id_t = torch.tensor(local_surf_ids, dtype=torch.long, device=dev)
+
+            min_t, best_col = torch.min(t_matrix, dim=1)
+            hit_mask = min_t < float('inf')
 
         if not hit_mask.any():
             return pixel_colors.reshape(camera.height, camera.width, 3).cpu()
 
-        # 2. Compute Colors for Hits
-        # We only loop to get Normals and Material properties, which are specific to visual rendering
+        winner_elem_ids = elem_id_t[best_col]
+        winner_surf_ids = surf_id_t[best_col]
+
         unique_elements = torch.unique(winner_elem_ids[hit_mask])
-
         for k_tensor in unique_elements:
-            k = k_tensor.item()
+            k       = k_tensor.item()
             element = self.scene.elements[k]
-
-            # Mask for rays hitting Element K
-            elem_mask = (winner_elem_ids == k) & hit_mask
-
-            # Mask for specific surfaces
-            surfs_on_elem = winner_surf_ids[elem_mask]
-            unique_surfs = torch.unique(surfs_on_elem)
+            elem_mask    = (winner_elem_ids == k) & hit_mask
+            unique_surfs = torch.unique(winner_surf_ids[elem_mask])
 
             for j_tensor in unique_surfs:
-                j = j_tensor.item()
+                j             = j_tensor.item()
                 specific_mask = elem_mask & (winner_surf_ids == j)
+                subset_rays   = rays[specific_mask]
 
-                # Get Rays for Normal Calculation
-                subset_rays = rays[specific_mask]
-
-                # Call Shape to get Normals
                 _, _, normal_global, _ = element.shape(subset_rays, j)
-
-                # Determine Color based on Physics Type
                 phys_func = element.surface_functions[j]
-                colors = self._compute_color(phys_func, normal_global)
-
-                # Scatter to pixel buffer
+                colors    = self._compute_color(phys_func, normal_global)
                 pixel_colors[specific_mask] = colors
 
         return torch.clamp(pixel_colors.reshape(camera.height, camera.width, 3), 0.0, 1.0).cpu()

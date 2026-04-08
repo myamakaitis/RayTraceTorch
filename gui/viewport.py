@@ -123,44 +123,65 @@ class RenderViewport:
     # ------------------------------------------------------------------
 
     def _draw_path_overlay(self):
-        """Project recorded ray paths into screen space and draw as lines."""
-        # Delete previously drawn overlay lines by their stored item IDs.
-        for item_id in self._overlay_items:
-            if dpg.does_item_exist(item_id):
-                dpg.delete_item(item_id)
-        self._overlay_items.clear()
+        """
+        Project recorded ray paths into screen space and draw as lines.
 
-        if not self.ray_visible or len(self.ray_path_history) < 2:
-            return
+        Flicker-free strategy
+        ---------------------
+        Build the full list of line specs first (pure Python, no DPG calls),
+        then apply one of two strategies:
 
-        # Subsample rays for performance (draw at most 100)
-        n_rays = self.ray_path_history[0].shape[0]
-        max_vis = 100
-        stride = max(1, n_rays // max_vis)
-        ray_indices = range(0, n_rays, stride)
+        * **Same count as last frame** (slider drag, camera orbit — geometry
+          unchanged): configure every existing draw_line item in-place.
+          Zero create/delete calls → overlay is never blank even for a single
+          frame.
 
-        cam = self._camera
-        w, h = self._w, self._h
+        * **Count changed** (new simulation, visibility toggled, ray history
+          replaced): draw all new lines *first*, then delete the old ones.
+          Old and new overlap for one sub-frame, which is invisible, but the
+          overlay is never completely absent.
+        """
+        cam   = self._camera
+        w, h  = self._w, self._h
         color = (255, 220, 60, int(self.ray_opacity))
-        thickness = float(self.ray_linewidth)
+        thick = float(self.ray_linewidth)
 
-        for ri in ray_indices:
-            prev_screen = None
-            for snap in self.ray_path_history:
-                pt3d = snap[ri]                              # [3]
-                sc, visible = self._project_point(pt3d, cam, w, h)
-                if visible and sc is not None:
-                    if prev_screen is not None:
-                        item_id = dpg.draw_line(
-                            prev_screen, sc,
-                            color=color,
-                            thickness=thickness,
-                            parent=self._drawlist_tag,
-                        )
-                        self._overlay_items.append(item_id)
-                    prev_screen = sc
-                else:
-                    prev_screen = None   # break the line on occluded segments
+        # --- 1. Compute desired line specs (no DPG calls yet) ---
+        new_specs: list = []   # [(p1, p2, color, thickness), ...]
+
+        if self.ray_visible and len(self.ray_path_history) >= 2:
+            n_rays = self.ray_path_history[0].shape[0]
+            stride = max(1, n_rays // 100)
+
+            for ri in range(0, n_rays, stride):
+                prev_sc = None
+                for snap in self.ray_path_history:
+                    sc, visible = self._project_point(snap[ri], cam, w, h)
+                    if visible:
+                        if prev_sc is not None:
+                            new_specs.append((prev_sc, sc, color, thick))
+                        prev_sc = sc
+                    else:
+                        prev_sc = None   # break line on occluded segment
+
+        # --- 2. Apply without blanking the overlay ---
+        if len(new_specs) == len(self._overlay_items):
+            # Configure in-place — no items created or destroyed
+            for item_id, (p1, p2, col, th) in zip(self._overlay_items, new_specs):
+                if dpg.does_item_exist(item_id):
+                    dpg.configure_item(item_id, p1=p1, p2=p2, color=col, thickness=th)
+        else:
+            # Draw new lines first so the overlay is never blank
+            new_ids = [
+                dpg.draw_line(p1, p2, color=col, thickness=th,
+                              parent=self._drawlist_tag)
+                for p1, p2, col, th in new_specs
+            ]
+            # Now safe to delete the old lines
+            for old_id in self._overlay_items:
+                if dpg.does_item_exist(old_id):
+                    dpg.delete_item(old_id)
+            self._overlay_items = new_ids
 
     @staticmethod
     def _project_point(pt3d: torch.Tensor, camera: OrbitCamera,
