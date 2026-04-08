@@ -17,7 +17,7 @@ class Bundle(nn.Module):
         self.dtype = dtype
 
         if transform is None:
-            self.transform = RayTransformBundle()
+            self.transform = RayTransformBundle(dtype=dtype)
         else:
             self.transform = transform
 

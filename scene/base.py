@@ -178,7 +178,18 @@ class Scene(nn.Module):
             return hit_mask, winner_element_ids, winner_surf_ids
 
     def step(self):
-        """Perform one physics bounce for all active rays."""
+        """
+        Perform one physics bounce for all active rays.
+
+        Iterates over every (element, surface) pair in a fixed static order —
+        no ``torch.unique`` / ``.item()`` calls in the hot path.  This makes
+        the per-element dispatch a compile-time-unrollable Python loop, while
+        keeping the actual tensor computation inside each ``element.forward``
+        fully compilable by ``torch.compile`` (see ``compile_elements``).
+
+        Rays that miss all (element, surface) pairs are left at their current
+        state because ``scatter_update`` only writes to ``active_mask`` indices.
+        """
         if self.rays is None:
             return
 
@@ -196,27 +207,49 @@ class Scene(nn.Module):
         next_dir       = torch.zeros_like(self.rays.dir)
         next_intensity = torch.zeros_like(self.rays.intensity)
 
-        for k_tensor in torch.unique(winner_element_ids[active_mask]):
-            k         = k_tensor.item()
-            element   = self.elements[k]
-            elem_mask = (winner_element_ids == k) & active_mask
-
-            for j_tensor in torch.unique(winner_surf_ids[elem_mask]):
-                j             = j_tensor.item()
-                specific_mask = elem_mask & (winner_surf_ids == j)
+        # Static loop: Python iterates once per (element, surface) at trace
+        # time, so torch.compile sees a fixed graph with no data-dependent
+        # branching in the dispatch itself.
+        for k, element in enumerate(self.elements):
+            for j in range(len(element.shape)):
+                specific_mask = active_mask \
+                                & (winner_element_ids == k) \
+                                & (winner_surf_ids == j)
+                if not specific_mask.any():
+                    continue
 
                 ray_subset = self.rays[specific_mask]
                 out_pos, out_dir, out_intensity = element(ray_subset, j)
 
-                next_pos       = next_pos.masked_scatter(specific_mask.unsqueeze(-1), out_pos)
-                next_dir       = next_dir.masked_scatter(specific_mask.unsqueeze(-1), out_dir)
-                next_intensity = next_intensity.masked_scatter(specific_mask, out_intensity)
+                next_pos[specific_mask]       = out_pos
+                next_dir[specific_mask]       = out_dir
+                next_intensity[specific_mask] = out_intensity
 
-        # scatter_update uses index_put with the boolean mask, so it expects
-        # value tensors of shape [M, ...] where M = active_mask.sum(), not [N, ...].
+        # scatter_update uses index_put — differentiable write-back.
+        # Value tensors must be [M, ...] where M = active_mask.sum().
         self.rays.scatter_update(
             active_mask,
             next_pos[active_mask],
             next_dir[active_mask],
             next_intensity[active_mask],
         )
+
+    def compile_elements(self):
+        """
+        Wrap every element in ``torch.compile`` for faster simulation.
+
+        Each element's ``forward`` (geometry intersection + physics) is traced
+        and compiled into a fused kernel.  ``dynamic=True`` lets the compiler
+        handle variable ray-subset sizes without retracing on every step.
+
+        **Call only after** all elements have been added and the scene is fully
+        assembled.  If elements are changed afterwards, call again.
+
+        The first simulation run after compiling will be slow (tracing).
+        Subsequent runs hit the compiled cache and are significantly faster.
+        """
+        self.elements = nn.ModuleList([
+            torch.compile(el, mode='reduce-overhead', dynamic=True)
+            for el in self.elements
+        ])
+        self._build_index_maps()   # rebuild maps — element objects replaced

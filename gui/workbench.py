@@ -246,6 +246,25 @@ def _show_error(msg: str):
 # Simulation
 # ============================================================
 
+def _compile_scene():
+    """Wrap all current scene elements with torch.compile."""
+    if not _scene.elements:
+        _show_error("No elements in scene.\nAdd elements and click UPDATE SCENE first.")
+        return
+    try:
+        dpg.configure_item("compile_btn", enabled=False)
+        dpg.set_value("sim_status", "Compiling (first run will trace)...")
+        dpg.render_dearpygui_frame()
+        _scene.compile_elements()
+        dpg.set_value("sim_status", "Compiled ✓  — first sim traces, then fast")
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        dpg.set_value("sim_status", "Compile failed (see console)")
+        _show_error(f"Compile error:\n{e}")
+    finally:
+        dpg.configure_item("compile_btn", enabled=True)
+
+
 def _reset_sensors():
     """Call reset() on every sensor in the scene and clear the results display."""
     for el in _scene.elements:
@@ -667,6 +686,8 @@ def _build_center_panel():
                           default_value=100, min_value=1, max_value=10_000, width=80)
         dpg.add_button(label="Run Simulation", tag="run_btn",
                        callback=_run_simulation)
+        dpg.add_button(label="Compile", tag="compile_btn",
+                       callback=_compile_scene)
         dpg.add_button(label="Reset Sensor", callback=_reset_sensors)
         dpg.add_text("Ready", tag="sim_status")
 

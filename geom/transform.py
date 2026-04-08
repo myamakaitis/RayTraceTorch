@@ -155,8 +155,8 @@ class RayTransformNoisy(RayTransform):
 
         self.zero = torch.nn.Parameter(torch.zeros(3, dtype=dtype), requires_grad = False)
 
-        self.trans_scale = torch.nn.Parameter(torch.as_tensor(trans_grad, dtype=dtype), requires_grad=False)
-        self.rot_scale = torch.nn.Parameter(torch.as_tensor(rot_grad, dtype=dtype), requires_grad=False)
+        self.trans_scale = torch.nn.Parameter(torch.as_tensor(std_translation, dtype=dtype), requires_grad=False)
+        self.rot_scale = torch.nn.Parameter(torch.as_tensor(std_rotation, dtype=dtype), requires_grad=False)
 
         self.trans_dist = Normal(self.zero, self.trans_scale)
         self.rot_dist = Normal(self.zero, self.rot_scale)
@@ -232,8 +232,8 @@ class RayTransformBundle(RayTransform):
         # Apply Rotation (P @ R.T is standard for row-vector multiplication)
 
         shifted_pos = _pos + self.trans[None, :]
-
-        global_pos = shifted_pos @ self.rot.T
+        global_pos = _pos + self.trans[None, :]
+        # global_pos = shifted_pos @ self.rot.T
         global_dir = _dir @ self.rot.T
 
         return global_pos, global_dir
@@ -248,7 +248,8 @@ class RayTransformBundle(RayTransform):
         Returns a NEW Rays object.
         """
 
-        global_pos = (_pos @ self.rot) - self.trans[None, :]
+        # global_pos = (_pos @ self.rot) - self.trans[None, :]
+        global_pos = _pos - self.trans[None, :]
         global_dir = (_dir @ self.rot)
 
         return global_pos, global_dir
