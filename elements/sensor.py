@@ -8,7 +8,7 @@ from ..phys import Transmit
 
 class Sensor(Element):
 
-    def __init__(self, shape: Union[Shape, Surface]):
+    def __init__(self, shape: Surface):
 
         super().__init__()
 

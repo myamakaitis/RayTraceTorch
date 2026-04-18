@@ -121,54 +121,24 @@ class RefractSnell(SurfaceFunction):
         self.ior_out = nn.Parameter(torch.as_tensor(ior_out), requires_grad=ior_out_grad)
 
     def forward(self, local_intersect, ray_dir, normal, **kwargs):
-        # 1. Orientation Check
-        # Calculate dot product (cos theta_in)
-        # ray_dir and normal should be normalized.
-
-        mu = self.ior_out / self.ior_in
-
         dot = torch.sum(ray_dir * normal, dim=1, keepdim=True)
 
-        # Standardize Normal:
-        # Refraction math assumes Normal points INTO the material we are entering (against the ray).
-        # Reflection math assumes Normal points OUT of the surface.
-
-        # We define 'ior_eff' as the normal pointing AGAINST the incoming ray for Snell's calculation.
-        # If dot < 0, Ray opposes Normal (standard entry). ior_eff = normal.
-        # If dot > 0, Ray aligns with Normal (standard exit). ior_eff = -normal.
         entering = dot < 0
         ior_eff = torch.where(entering, normal, -normal)
-        c1 = torch.abs(dot)  # cos(theta_1) must be positive magnitude
+        c1 = torch.abs(dot)
 
-        # 2. Snell's Law Discriminant
-        # term = 1 - mu^2 * (1 - cos^2(theta_1))
-        # If term < 0, we have TIR.
+        # Flip IOR ratio depending on whether the ray is entering or exiting the medium.
+        # TIR can only occur when going high->low IOR (exiting), so this also fixes TIR detection.
+        mu = torch.where(entering, self.ior_out / self.ior_in, self.ior_in / self.ior_out)
+
         term_sq = 1.0 - mu ** 2 * (1.0 - c1 ** 2)
-
-        # Create TIR Mask
         tir_mask = term_sq < 0
 
-        # --- BRANCH A: REFRACTION (Where term_sq >= 0) ---
-        # Safe sqrt for gradients (clamp negative to 0)
         c2 = torch.sqrt(torch.relu(term_sq))
-
-        # Vector Snell's Law: V_out = mu*I + (mu*c1 - c2)*N
         v_refract = mu * ray_dir + (mu * c1 - c2) * ior_eff
-
-        # --- BRANCH B: REFLECTION (Where term_sq < 0) ---
-        # Formula: R = I - 2(I . N)N
-        # Note: We must use the ORIGINAL normal logic for reflection (Standard reflection uses N).
-        # Actually, reflection is symmetric.
-        # I - 2(I.N)N works regardless of whether N points up or down,
-        # as long as N is the surface normal axis.
         v_reflect = ray_dir - 2 * dot * normal
 
-        # --- COMBINE ---
-        # Select result based on TIR mask
         out_dir = torch.where(tir_mask, v_reflect, v_refract)
-
-        # Normalize to prevent drift
-        out_dir = F.normalize(out_dir, p=2, dim=1)
 
         intensity_mod = torch.ones_like(ray_dir[:, 0])
 
@@ -192,60 +162,35 @@ class RefractFresnel(SurfaceFunction):
         self.ior_in = nn.Parameter(torch.as_tensor(ior_in), requires_grad=ior_in_grad)
         self.ior_out = nn.Parameter(torch.as_tensor(ior_out), requires_grad=ior_out_grad)
 
-    def _fresnel_reflectance(self, cos_i, cos_t):
-        """
-        Computes Fresnel Reflectance R for unpolarized light.
-        R = 0.5 * (Rs + Rp)
-        """
+    def _fresnel_reflectance(self, cos_i, cos_t, n1, n2):
+        """Fresnel reflectance R for unpolarized light: R = 0.5 * (Rs + Rp)."""
+        n1_ci = n1 * cos_i
+        n2_ct = n2 * cos_t
+        rs = ((n1_ci - n2_ct) / (n1_ci + n2_ct + 1e-8)) ** 2
 
-        # Rs (s-polarized): Perpendicular
-        # (n1 cos_i - n2 cos_t) / (n1 cos_i + n2 cos_t)
-        n1_ci = self.ior_in * cos_i
-        n2_ct = self.ior_out * cos_t
-        rs_num = n1_ci - n2_ct
-        rs_den = n1_ci + n2_ct
-        rs = (rs_num / (rs_den + 1e-8)) ** 2
-
-        # Rp (p-polarized): Parallel
-        # (n1 cos_t - n2 cos_i) / (n1 cos_t + n2 cos_i)
-        n1_ct = self.ior_in * cos_t
-        n2_ci = self.ior_out * cos_i
-        rp_num = n1_ct - n2_ci
-        rp_den = n1_ct + n2_ci
-        rp = (rp_num / (rp_den + 1e-8)) ** 2
+        n1_ct = n1 * cos_t
+        n2_ci = n2 * cos_i
+        rp = ((n1_ct - n2_ci) / (n1_ct + n2_ci + 1e-8)) ** 2
 
         return 0.5 * (rs + rp)
 
     def forward(self, local_intersect, ray_dir, normal, **kwargs):
-        # 1. Geometry Setup
-        # dot < 0: Entering (cos_i > 0). dot > 0: Exiting.
         dot = torch.sum(ray_dir * normal, dim=1, keepdim=True)
         entering = dot < 0
 
-        # Effective Normal points AGAINST ray
         ior_eff = torch.where(entering, normal, -normal)
-        cos_i = torch.abs(dot)  # Enforce positive cosine
+        cos_i = torch.abs(dot)
 
-        # 2. Compute Refraction Angle (Snell's Law)
-        # sin^2(t) = mu^2 * sin^2(i)
-        # sin^2(i) = 1 - cos^2(i)
-        mu = self.ior_out / self.ior_in
+        # Swap n1/n2 depending on direction so mu and Fresnel equations are correct on exit.
+        n1 = torch.where(entering, self.ior_in, self.ior_out)
+        n2 = torch.where(entering, self.ior_out, self.ior_in)
+        mu = n2 / n1
+
         sin2_t = (mu ** 2) * (1.0 - cos_i ** 2)
-
-        # Check TIR
         is_tir = sin2_t > 1.0
-
-        # Calculate cos_t (safe sqrt)
-        # If TIR, term is negative, relu makes it 0.
         cos_t = torch.sqrt(torch.relu(1.0 - sin2_t))
 
-        # 3. Calculate Probability of Reflection (R)
-        # Initialize R with 1.0 (TIR case)
-        R = torch.ones_like(cos_i)
-
-        # Full tensor computation (safe because we use where later)
-        # The calculation might produce garbage for TIR indices, but we filter them.
-        r_full = self._fresnel_reflectance(cos_i, cos_t)
+        r_full = self._fresnel_reflectance(cos_i, cos_t, n1, n2)
         R = torch.where(is_tir, torch.as_tensor(1.0), r_full)
 
         # 4. Stochastic Decision (Monte Carlo)
@@ -268,7 +213,6 @@ class RefractFresnel(SurfaceFunction):
 
         # 6. Select Output
         out_dir = torch.where(reflect_mask, v_reflect, v_refract)
-        out_dir = F.normalize(out_dir, p=2, dim=1)
 
         intensity_mod = torch.ones_like(ray_dir[:, 0])
 

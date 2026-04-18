@@ -68,3 +68,14 @@ class Element(nn.Module):
         T_inv = self.shape.transform.paraxial_inv()
 
         return [self.shape.z], [T_inv @ self._paraxial() @ T]
+
+
+class ElementCustom(Element):
+
+    def __init__(self, shape: Shape, surface_function: SurfaceFunction, device: torch.device):
+
+        super().__init__()
+
+        self.shape = shape
+
+        self.surface_functions.extend(len(shape)*[surface_function])

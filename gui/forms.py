@@ -143,7 +143,8 @@ try:
     from ..geom.shape import Shape
     from ..geom.primitives import Surface
     from ..geom.transform import RayTransform, RayTransformBundle
-    _KNOWN_BASES = [Element, Bundle, Shape, Surface, RayTransform, RayTransformBundle]
+    from ..phys.std import SurfaceFunction
+    _KNOWN_BASES = [Element, Bundle, Shape, Surface, RayTransform, RayTransformBundle, SurfaceFunction]
 except Exception:
     _KNOWN_BASES = [Bundle]
 
