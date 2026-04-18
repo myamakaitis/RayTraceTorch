@@ -219,11 +219,6 @@ class RayTransformBundle(RayTransform):
 
     def transform_(self, _pos, _dir):
         """
-        Applies the transformation (Local -> Global).
-        New Pos = (Pos @ R.T) + T
-        New Dir = (Dir @ R.T)
-
-        Returns a NEW Rays object (non-destructive).
         """
         # Create a copy of the rays to avoid modifying the input in-place
         # We assume Rays class has a mechanism to copy or we create new one
@@ -232,8 +227,11 @@ class RayTransformBundle(RayTransform):
         # Apply Rotation (P @ R.T is standard for row-vector multiplication)
 
         shifted_pos = _pos + self.trans[None, :]
-        global_pos = _pos + self.trans[None, :]
+
         # global_pos = shifted_pos @ self.rot.T
+
+        rot_pos = _pos @ self.rot.T
+        global_pos = rot_pos + self.trans[None, :]
         global_dir = _dir @ self.rot.T
 
         return global_pos, global_dir
@@ -241,15 +239,12 @@ class RayTransformBundle(RayTransform):
 
     def invTransform_(self, _pos, _dir):
         """
-        Applies the INVERSE transformation (Global -> Local).
-        New Pos = (Pos - T) @ R
-        New Dir = Dir @ R
-
-        Returns a NEW Rays object.
         """
 
         # global_pos = (_pos @ self.rot) - self.trans[None, :]
-        global_pos = _pos - self.trans[None, :]
-        global_dir = (_dir @ self.rot)
+        shifted_pos = _pos - self.trans[None, :]
 
-        return global_pos, global_dir
+        local_pos = shifted_pos @ self.rot
+        local_dir = _dir @ self.rot
+
+        return local_pos, local_dir
