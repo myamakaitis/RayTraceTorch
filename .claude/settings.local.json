@@ -3,7 +3,9 @@
     "allow": [
       "Bash(C:/Users/Mark/anaconda3/envs/rtt-env/python.exe -c \"import dearpygui.dearpygui as dpg; print\\(dpg.__version__\\)\")",
       "Bash(C:/Users/Mark/anaconda3/envs/rtt-env/python.exe -c \"import dearpygui; print\\(dearpygui.__version__\\)\")",
-      "Bash(C:/Users/Mark/anaconda3/envs/rtt-env/python.exe -c \":*)"
+      "Bash(C:/Users/Mark/anaconda3/envs/rtt-env/python.exe -c \":*)",
+      "Read(//c/Users/Mark/anaconda3/**)",
+      "Bash(py -0)"
     ]
   }
 }
