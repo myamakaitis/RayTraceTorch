@@ -23,6 +23,7 @@ import torch.nn as nn
 import dearpygui.dearpygui as dpg
 
 from ..scene import Scene
+from ..scene.sequential import SequentialScene
 from ..render.camera import Renderer, OrbitCamera
 from ..rays.ray import Rays, Paths
 from ..elements.parent import Element
@@ -50,6 +51,7 @@ _last_sim_rays = None   # Rays after the most recent simulation
 
 _is_dirty: bool = False
 _current_path: Optional[str] = None
+_selected_element_idx: int = -1   # index of picked/selected element
 
 # Tracks which plot tags currently have equal_aspects=True so the toggle
 # button can flip the state without querying DPG (no getter for this flag).
@@ -98,6 +100,143 @@ def _refresh_all_views():
     _viewport.refresh()
     _profile_xz.update()
     _profile_yz.update()
+
+
+# ============================================================
+# Element picking / selection
+# ============================================================
+
+def _on_element_picked(elem_idx, surf_idx):
+    """Called by the viewport when the user clicks on an element."""
+    global _selected_element_idx
+
+    if elem_idx is None:
+        # Clicked background — deselect
+        _selected_element_idx = -1
+        _viewport.gizmo.clear()
+        if dpg.does_item_exist("pick_status"):
+            dpg.set_value("pick_status", "")
+        _viewport.redraw_overlay()
+        return
+
+    _selected_element_idx = elem_idx
+
+    # Select in the listbox
+    labels = _element_manager._get_labels()
+    if 0 <= elem_idx < len(labels):
+        dpg.set_value(_element_manager._listbox_tag, labels[elem_idx])
+
+    # Show info
+    if dpg.does_item_exist("pick_status"):
+        name = "?"
+        if 0 <= elem_idx < len(_element_manager.configs):
+            name = _element_manager.configs[elem_idx]['config'].get('name', f'Element_{elem_idx}')
+        dpg.set_value("pick_status", f"Selected: {name}  •  Surface #{surf_idx}")
+
+    # Attach gizmo
+    if 0 <= elem_idx < len(_scene.elements):
+        _viewport.gizmo.set_element(_scene.elements[elem_idx], elem_idx)
+        _viewport.redraw_overlay()
+
+
+def _on_gizmo_drag_complete(target_kind: str, target_idx: int):
+    """Called after a gizmo drag finishes — sync params and refresh views."""
+    _sync_transform_to_config(target_kind, target_idx)
+    _mark_dirty()
+    _refresh_all_views()
+
+
+def _sync_transform_to_config(target_kind: str, target_idx: int):
+    """
+    Read the live transform nn.Parameters back into the stored config dict
+    so the Edit form shows updated translation/rotation values.
+    """
+    if target_kind == 'element':
+        if 0 <= target_idx < len(_element_manager.configs):
+            element = _scene.elements[target_idx]
+            transform = element.shape.transform
+            cfg = _element_manager.configs[target_idx]['config']
+        else:
+            return
+    elif target_kind == 'bundle':
+        if 0 <= target_idx < len(_bundle_manager.configs):
+            bundle, _ = _bundle_manager.bundle_instances[target_idx]
+            transform = bundle.transform
+            cfg = _bundle_manager.configs[target_idx]['config']
+        else:
+            return
+    else:
+        return
+
+    # Read live values
+    trans_vals = transform.trans.detach().cpu().tolist()
+    rot_vals = transform.rot_vec.detach().cpu().tolist()
+
+    # Patch the config — the transform lives inside params.transform.params
+    _patch_transform_in_config(cfg.get('params', {}), trans_vals, rot_vals)
+
+
+def _patch_transform_in_config(params: dict, trans_vals: list, rot_vals: list):
+    """
+    Recursively find and update the 'translation' and 'rotation' fields
+    inside the config's transform sub-dict.
+    """
+    # Direct transform params at this level
+    if 'translation' in params:
+        params['translation'] = trans_vals
+    if 'rotation' in params:
+        params['rotation'] = rot_vals
+
+    # Nested inside a 'transform' key (polymorphic class config)
+    if 'transform' in params and isinstance(params['transform'], dict):
+        sub = params['transform']
+        if 'params' in sub:
+            sub_params = sub['params']
+            if 'translation' in sub_params:
+                sub_params['translation'] = trans_vals
+            if 'rotation' in sub_params:
+                sub_params['rotation'] = rot_vals
+
+
+# ============================================================
+# Scene type switching
+# ============================================================
+
+def _switch_scene_type(sender, app_data):
+    """Called when the scene-type combo changes."""
+    global _scene, _selected_element_idx
+    target = app_data  # "Non-Sequential" or "Sequential"
+
+    is_currently_sequential = isinstance(_scene, SequentialScene)
+    want_sequential = (target == "Sequential")
+
+    if want_sequential == is_currently_sequential:
+        return
+
+    try:
+        if want_sequential:
+            new_scene = _scene.to_sequential()
+        else:
+            new_scene = _scene.to_base()
+
+        new_scene.to(_device)
+        new_scene._build_index_maps()
+
+        _scene = new_scene
+        _renderer.scene = _scene
+        _profile_xz._scene = _scene
+        _profile_yz._scene = _scene
+
+        # Deselect — element indices may have changed
+        _selected_element_idx = -1
+        _viewport.gizmo.clear()
+
+        _mark_dirty()
+        _refresh_all_views()
+        dpg.set_value("sim_status", f"Switched to {target} mode")
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        _show_error(f"Scene conversion failed:\n{e}")
 
 
 # ============================================================
@@ -625,12 +764,51 @@ def _build_left_panel():
     with dpg.tab_bar():
         with dpg.tab(label="Elements"):
             _element_manager.build(dpg.last_item())
+            dpg.add_button(label="Select in Viewport", parent=dpg.last_item(),
+                           width=-1, callback=_on_element_listbox_select)
 
         with dpg.tab(label="Rays"):
             _bundle_manager.build(dpg.last_item())
+            dpg.add_button(label="Select in Viewport", parent=dpg.last_item(),
+                           width=-1, callback=_on_bundle_listbox_select)
 
         with dpg.tab(label="Optimize"):
             _build_optimizer_panel()
+
+
+def _on_element_listbox_select():
+    """Attach gizmo to the element currently selected in the Elements listbox."""
+    global _selected_element_idx
+    sel = dpg.get_value(_element_manager._listbox_tag)
+    labels = _element_manager._get_labels()
+    if sel not in labels:
+        return
+    idx = labels.index(sel)
+    if 0 <= idx < len(_scene.elements):
+        _selected_element_idx = idx
+        _viewport.gizmo.set_element(_scene.elements[idx], idx)
+        name = _element_manager.configs[idx]['config'].get('name', f'Element_{idx}')
+        if dpg.does_item_exist("pick_status"):
+            dpg.set_value("pick_status", f"Selected: {name}")
+        _viewport.redraw_overlay()
+
+
+def _on_bundle_listbox_select():
+    """Attach gizmo to the bundle currently selected in the Rays listbox."""
+    global _selected_element_idx
+    sel = dpg.get_value(_bundle_manager._listbox_tag)
+    labels = _bundle_manager._get_labels()
+    if sel not in labels:
+        return
+    idx = labels.index(sel)
+    if 0 <= idx < len(_bundle_manager.bundle_instances):
+        bundle, _ = _bundle_manager.bundle_instances[idx]
+        _selected_element_idx = -1  # clear element selection
+        _viewport.gizmo.set_bundle(bundle, idx)
+        name = _bundle_manager.configs[idx]['config'].get('name', f'Bundle_{idx}')
+        if dpg.does_item_exist("pick_status"):
+            dpg.set_value("pick_status", f"Selected bundle: {name}")
+        _viewport.redraw_overlay()
 
 
 def _build_optimizer_panel():
@@ -666,9 +844,12 @@ def _clear_ray_overlay():
 
 def _build_center_panel():
     dpg.add_text(
-        "Left-drag: Orbit  |  Mid-drag: Pan  |  Scroll: Zoom  |  Alt+Left: Roll"
+        "Left-drag: Orbit  |  Mid-drag: Pan  |  Scroll: Zoom  |  Alt+Left: Roll  |  Click: Pick"
     )
     _viewport.build(dpg.last_container())
+
+    dpg.add_spacer(height=2)
+    dpg.add_text("", tag="pick_status", color=(180, 220, 255, 255))
 
     dpg.add_spacer(height=4)
     with dpg.group(horizontal=True):
@@ -686,6 +867,10 @@ def _build_center_panel():
 
     dpg.add_spacer(height=4)
     with dpg.group(horizontal=True):
+        dpg.add_combo(["Non-Sequential", "Sequential"],
+                      default_value="Non-Sequential",
+                      label="##scene_type", tag="scene_type_combo", width=130,
+                      callback=_switch_scene_type)
         dpg.add_input_int(label="Bounces", tag="nbounces_input",
                           default_value=100, min_value=1, max_value=10_000, width=80)
         dpg.add_button(label="Run Simulation", tag="run_btn",
@@ -851,6 +1036,10 @@ def run():
     _viewport  = RenderViewport(_renderer, _cam, width=800, height=800)
     _profile_xz = ProfilePlot(_renderer, _scene, axis='x')
     _profile_yz = ProfilePlot(_renderer, _scene, axis='y')
+
+    # Wire picking and gizmo callbacks
+    _viewport.on_element_picked = _on_element_picked
+    _viewport.gizmo.on_drag_complete = _on_gizmo_drag_complete
 
     _element_manager = ItemManager(
         title="Optical Element",

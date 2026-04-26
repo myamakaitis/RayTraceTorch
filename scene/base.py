@@ -253,3 +253,37 @@ class Scene(nn.Module):
             for el in self.elements
         ])
         self._build_index_maps()   # rebuild maps — element objects replaced
+
+    # ------------------------------------------------------------------
+    # Scene type conversion
+    # ------------------------------------------------------------------
+
+    def to_sequential(self):
+        """
+        Convert to a ``SequentialScene`` by sorting elements along the
+        optical axis (Z position of each element's transform).
+
+        Returns
+        -------
+        SequentialScene
+            New scene with elements in Z-sorted order, bundles copied over.
+        """
+        from .sequential import SequentialScene
+
+        # Sort elements by Z position (ascending along the optical axis)
+        sorted_elements = sorted(
+            self.elements,
+            key=lambda el: el.shape.transform.trans[2].item()
+        )
+
+        seq = SequentialScene(sorted_elements)
+        seq.Nbounces = self.Nbounces
+
+        # Copy bundles
+        for bundle, n in zip(self.bundles, self._bundle_N_rays):
+            seq.add_bundle(bundle, n)
+
+        if self.rays is not None:
+            seq.rays = self.rays
+
+        return seq

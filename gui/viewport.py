@@ -11,9 +11,12 @@ on top of them.
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import dearpygui.dearpygui as dpg
 
 from ..render.camera import Renderer, OrbitCamera
+from ..rays.ray import Rays
+from .gizmo import Gizmo
 
 
 # ============================================================
@@ -38,6 +41,9 @@ class RenderViewport:
     PAN_SENS   = 0.04
     ZOOM_SENS  = 0.10
     ROLL_SENS  = 0.008
+
+    # Click vs drag threshold (pixels)
+    _CLICK_THRESHOLD = 4
 
     def __init__(self, renderer: Renderer, camera: OrbitCamera,
                  width: int = 800, height: int = 800):
@@ -78,6 +84,13 @@ class RenderViewport:
 
         # Mouse state
         self._prev_mouse: tuple = (0.0, 0.0)
+        self._mouse_down_pos: tuple | None = None  # position at left-button-down
+
+        # Gizmo
+        self.gizmo = Gizmo(self)
+
+        # Picking callback: fn(element_idx, surface_idx) or fn(None, None) on miss
+        self.on_element_picked = None
 
     # ------------------------------------------------------------------
     # Build
@@ -103,6 +116,79 @@ class RenderViewport:
         with dpg.handler_registry():
             dpg.add_mouse_move_handler(callback=self._on_mouse_move)
             dpg.add_mouse_wheel_handler(callback=self._on_scroll)
+            dpg.add_mouse_click_handler(dpg.mvMouseButton_Left,
+                                        callback=self._on_left_click)
+            dpg.add_mouse_release_handler(dpg.mvMouseButton_Left,
+                                          callback=self._on_left_release)
+            dpg.add_mouse_down_handler(dpg.mvMouseButton_Left,
+                                       callback=self._on_left_down)
+
+    # ------------------------------------------------------------------
+    # Picking
+    # ------------------------------------------------------------------
+
+    def pick(self, px: float, py: float):
+        """
+        Cast a single ray at screen pixel (px, py) and return the hit
+        element and surface index, or None.
+
+        Returns
+        -------
+        (element_idx, surface_idx) : (int, int)  or  None
+        """
+        scene = self._renderer.scene
+        if not scene.elements:
+            return None
+
+        cam = self._camera
+        # Generate a single ray for this pixel
+        aspect = self._w / self._h
+        scale_y = float(torch.tan(torch.deg2rad(
+            torch.tensor(cam.fov_deg * 0.5, dtype=torch.float32))))
+        scale_x = scale_y * aspect
+
+        # Normalised coordinates [-1, 1]
+        nx = (2.0 * px / self._w - 1.0) * scale_x
+        ny = (1.0 - 2.0 * py / self._h) * scale_y
+
+        direction = (cam.right * nx + cam.up_cam * ny + cam.forward)
+        direction = F.normalize(direction, dim=0)
+
+        origin = cam.origin.unsqueeze(0)       # [1, 3]
+        direction = direction.unsqueeze(0)     # [1, 3]
+
+        ray = Rays.initialize(origin, direction, device=cam.origin.device)
+
+        # Filter apertures (same as Renderer.render_3d)
+        def _is_aperture(el):
+            return any('ApertureFilter' in type(f).__name__ or 'Fuzzy' in type(f).__name__
+                       for f in el.surface_functions)
+
+        with torch.no_grad():
+            t_blocks = []
+            local_elem_ids = []
+            local_surf_ids = []
+            for k, el in enumerate(scene.elements):
+                if _is_aperture(el):
+                    continue
+                t_block = el.intersectTest(ray)  # [1, n_surfs]
+                t_blocks.append(t_block)
+                for s in range(t_block.shape[1]):
+                    local_elem_ids.append(k)
+                    local_surf_ids.append(s)
+
+            if not t_blocks:
+                return None
+
+            t_matrix = torch.cat(t_blocks, dim=1)  # [1, total_surfs]
+            min_t, best_col = torch.min(t_matrix, dim=1)
+
+            if min_t.item() >= float('inf'):
+                return None
+
+            elem_idx = local_elem_ids[best_col.item()]
+            surf_idx = local_surf_ids[best_col.item()]
+            return (elem_idx, surf_idx)
 
     # ------------------------------------------------------------------
     # Render
@@ -114,6 +200,10 @@ class RenderViewport:
             self._draw_path_overlay()
         except Exception as e:
             print(f"[RenderViewport] overlay error: {e}")
+        try:
+            self.gizmo.draw()
+        except Exception as e:
+            print(f"[RenderViewport] gizmo error: {e}")
 
     def refresh(self):
         """Re-render the scene and update the texture + path overlay."""
@@ -130,6 +220,11 @@ class RenderViewport:
             self._draw_path_overlay()
         except Exception as e:
             print(f"[RenderViewport] overlay error: {e}")
+
+        try:
+            self.gizmo.draw()
+        except Exception as e:
+            print(f"[RenderViewport] gizmo error: {e}")
 
     # ------------------------------------------------------------------
     # Ray-path overlay
@@ -232,11 +327,92 @@ class RenderViewport:
     def _is_hovered(self) -> bool:
         return dpg.is_item_hovered(self._drawlist_tag)
 
+    def _get_local_mouse(self) -> tuple:
+        """Get mouse position relative to the drawlist top-left."""
+        mx, my = dpg.get_mouse_pos(local=False)
+        # Get the drawlist screen position
+        try:
+            rect_min = dpg.get_item_rect_min(self._drawlist_tag)
+            return (mx - rect_min[0], my - rect_min[1])
+        except Exception:
+            return (mx, my)
+
+    def _on_left_down(self, sender, app_data):
+        """Track where the left button was pressed for click detection."""
+        if not self._is_hovered():
+            return
+
+        mx, my = dpg.get_mouse_pos(local=False)
+
+        # Only record the press position once at the start of a press
+        if self._mouse_down_pos is None:
+            self._mouse_down_pos = (mx, my)
+
+        # Only begin a gizmo drag once (down_handler fires every frame)
+        if not self.gizmo.is_dragging and self.gizmo.element is not None:
+            local = self._get_local_mouse()
+            hit = self.gizmo.hit_test(local[0], local[1])
+            if hit is not None:
+                mode, axis = hit
+                self.gizmo.begin_drag(mode, axis, (mx, my))
+
+    def _on_left_release(self, sender, app_data):
+        """End gizmo drag on mouse release — fallback (primary is in _on_mouse_move)."""
+        if self.gizmo.is_dragging:
+            self.gizmo.end_drag()
+            self.refresh()
+        self._mouse_down_pos = None
+
+    def _on_left_click(self, sender, app_data):
+        """
+        Fired on left click. Distinguish click from drag using displacement
+        threshold. On a true click, perform element picking.
+        """
+        # Safety net: if we're still dragging when click fires, end it
+        if self.gizmo.is_dragging:
+            self.gizmo.end_drag()
+            self._mouse_down_pos = None
+            self.refresh()
+            return
+
+        if not self._is_hovered():
+            return
+
+        mx, my = dpg.get_mouse_pos(local=False)
+        if self._mouse_down_pos is not None:
+            dx = mx - self._mouse_down_pos[0]
+            dy = my - self._mouse_down_pos[1]
+            if (dx * dx + dy * dy) > self._CLICK_THRESHOLD ** 2:
+                return  # was a drag, not a click
+
+        local = self._get_local_mouse()
+        if 0 <= local[0] <= self._w and 0 <= local[1] <= self._h:
+            result = self.pick(local[0], local[1])
+            if self.on_element_picked is not None:
+                if result is not None:
+                    self.on_element_picked(result[0], result[1])
+                else:
+                    self.on_element_picked(None, None)
+
     def _on_mouse_move(self, sender, app_data):
         mx, my = dpg.get_mouse_pos(local=False)
         dx = mx - self._prev_mouse[0]
         dy = my - self._prev_mouse[1]
         self._prev_mouse = (mx, my)
+
+        # ── Gizmo drag lifecycle (poll-based, reliable) ──
+        if self.gizmo.is_dragging:
+            left_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
+            if not left_down:
+                # Button was released — end the drag
+                self.gizmo.end_drag()
+                self._mouse_down_pos = None
+                self.refresh()
+                return
+            # Still dragging — update and refresh
+            self.gizmo.update_drag((mx, my))
+            self.refresh()
+            return
 
         if not self._is_hovered():
             return

@@ -73,4 +73,33 @@ class SequentialScene(Scene):
         center_clearance = self._getCenterClearance()
         edge_clearance = self._getEdgeClearance()
 
+    # ------------------------------------------------------------------
+    # Scene type conversion
+    # ------------------------------------------------------------------
 
+    def to_base(self):
+        """
+        Convert to a general non-sequential ``Scene``, preserving element
+        order and all bundles.
+
+        Returns
+        -------
+        Scene
+            New non-sequential scene.
+        """
+        from .base import Scene
+
+        base = Scene()
+        base.Nbounces = self.Nbounces
+
+        for el in self.elements:
+            base.add_element(el)
+
+        for bundle, n in zip(self.bundles, self._bundle_N_rays):
+            base.add_bundle(bundle, n)
+
+        if self.rays is not None:
+            base.rays = self.rays
+
+        base._build_index_maps()
+        return base

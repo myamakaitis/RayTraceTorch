@@ -445,6 +445,7 @@ class ItemManager:
     """
 
     _counter = 0  # class-level counter for unique tag namespacing
+    _clipboard: dict | None = None  # class-level clipboard for copy/paste
 
     def __init__(self, title: str, base_cls, on_update, on_data_changed=None,
                  device=None, dtype=None):
@@ -489,9 +490,14 @@ class ItemManager:
         dpg.add_listbox([], label="", tag=self._listbox_tag,
                         parent=parent_tag, num_items=8, width=-1)
         with dpg.group(horizontal=True, parent=parent_tag):
-            dpg.add_button(label="Add",    width=65, callback=self._open_add)
-            dpg.add_button(label="Edit",   width=65, callback=self._open_edit)
-            dpg.add_button(label="Delete", width=65, callback=self._do_delete)
+            dpg.add_button(label="Add",    width=55, callback=self._open_add)
+            dpg.add_button(label="Edit",   width=55, callback=self._open_edit)
+            dpg.add_button(label="Delete", width=55, callback=self._do_delete)
+            dpg.add_button(label="Copy",   width=45, callback=self._do_copy)
+            dpg.add_button(label="Paste",  width=45, callback=self._do_paste)
+        with dpg.group(horizontal=True, parent=parent_tag):
+            dpg.add_button(label="Up", width=30, callback=self._move_up)
+            dpg.add_button(label="Dn", width=30, callback=self._move_down)
         dpg.add_button(label="UPDATE SCENE", parent=parent_tag, width=-1,
                        callback=self._do_build)
 
@@ -531,6 +537,63 @@ class ItemManager:
         if sel not in labels:
             return
         self.configs.pop(labels.index(sel))
+        self._refresh_list()
+        if self._on_data_changed:
+            self._on_data_changed()
+
+    def _move_up(self):
+        sel = dpg.get_value(self._listbox_tag)
+        labels = self._get_labels()
+        if sel not in labels:
+            return
+        idx = labels.index(sel)
+        if idx <= 0:
+            return
+        self.configs[idx], self.configs[idx - 1] = self.configs[idx - 1], self.configs[idx]
+        self._refresh_list()
+        # Re-select the moved item at its new position
+        new_labels = self._get_labels()
+        if idx - 1 < len(new_labels):
+            dpg.set_value(self._listbox_tag, new_labels[idx - 1])
+        if self._on_data_changed:
+            self._on_data_changed()
+
+    def _move_down(self):
+        sel = dpg.get_value(self._listbox_tag)
+        labels = self._get_labels()
+        if sel not in labels:
+            return
+        idx = labels.index(sel)
+        if idx >= len(self.configs) - 1:
+            return
+        self.configs[idx], self.configs[idx + 1] = self.configs[idx + 1], self.configs[idx]
+        self._refresh_list()
+        # Re-select the moved item at its new position
+        new_labels = self._get_labels()
+        if idx + 1 < len(new_labels):
+            dpg.set_value(self._listbox_tag, new_labels[idx + 1])
+        if self._on_data_changed:
+            self._on_data_changed()
+
+    def _do_copy(self):
+        import copy
+        sel = dpg.get_value(self._listbox_tag)
+        labels = self._get_labels()
+        if sel not in labels:
+            return
+        idx = labels.index(sel)
+        ItemManager._clipboard = copy.deepcopy(self.configs[idx])
+
+    def _do_paste(self):
+        import copy
+        if ItemManager._clipboard is None:
+            return
+        entry = copy.deepcopy(ItemManager._clipboard)
+        # Append "_copy" to the name to avoid duplicates
+        cfg = entry.get('config', entry)
+        name = cfg.get('name', 'Item')
+        cfg['name'] = f"{name}_copy"
+        self.configs.append(entry)
         self._refresh_list()
         if self._on_data_changed:
             self._on_data_changed()

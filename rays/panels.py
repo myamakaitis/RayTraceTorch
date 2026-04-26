@@ -7,7 +7,13 @@ from ..geom import RayTransformBundle
 from .bundle import DiskSample, Bundle, SolidAngleSample
 
 
-class LambertianSample:
+class EmissionModel:
+    """Base class for surface emission profiles."""
+    def sample_dir(self, N: int, device: Union[str, torch.device], dtype: torch.dtype) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class LambertianEmission(EmissionModel):
     """
     Samples directions from a cosine-weighted (Lambertian) hemisphere around +Z.
 
@@ -18,17 +24,41 @@ class LambertianSample:
     which exactly matches the pdf p(θ) = cos(θ)/π.
     """
 
-    def sample(self, N: int,
-               device: Union[str, torch.device] = 'cpu',
-               dtype: torch.dtype = torch.float32) -> torch.Tensor:
+    def sample_dir(self, N: int,
+                   device: Union[str, torch.device] = 'cpu',
+                   dtype: torch.dtype = torch.float32) -> torch.Tensor:
         u1 = torch.rand(N, device=device, dtype=dtype)
         u2 = torch.rand(N, device=device, dtype=dtype)
         r   = torch.sqrt(u1)
-        phi = 2.0 * torch.pi * u2
+        phi = 2.0 * math.pi * u2
         x   = r * torch.cos(phi)
         y   = r * torch.sin(phi)
         z   = torch.sqrt((1.0 - u1).clamp(min=0.0))
         return torch.stack([x, y, z], dim=1)
+
+
+class SolidAngleEmission(EmissionModel):
+    """
+    Samples directions uniformly within a cone of half-angle `cone_angle` around +Z.
+    """
+    def __init__(self, cone_angle: float = math.pi / 4.0):
+        self.cone_angle = cone_angle
+
+    def sample_dir(self, N: int,
+                   device: Union[str, torch.device] = 'cpu',
+                   dtype: torch.dtype = torch.float32) -> torch.Tensor:
+        zero = torch.tensor([0.0], device=device, dtype=dtype)
+        twopi = torch.tensor([2.0 * math.pi], device=device, dtype=dtype)
+        rad = torch.tensor([self.cone_angle], device=device, dtype=dtype)
+        F_phi_max = SolidAngleSample.CDF_phi(rad)
+        sampler = SolidAngleSample(zero, F_phi_max, zero, twopi)
+        
+        phi, theta = sampler.sample(N)
+        dz = torch.cos(phi)
+        dr = torch.sin(phi)
+        dx, dy = torch.cos(theta)*dr, torch.sin(theta)*dr
+        res = torch.stack([dx, dy, dz], dim=1)
+        return res.to(device=device, dtype=dtype)
 
 
 class PanelSource(Bundle):
@@ -44,34 +74,12 @@ class PanelSource(Bundle):
                  device: Union[str, torch.device] = 'cpu',
                  dtype: torch.dtype = torch.float32,
                  transform: Optional[Union[RayTransformBundle, None]] = None,
-                 sampling_type: str = 'lambertian',
-                 cone_angle: float = math.pi / 4.0):
+                 emission: EmissionModel = LambertianEmission()):
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
-        
-        self.sampling_type = sampling_type
-        
-        if sampling_type == 'lambertian':
-            self._lambertian = LambertianSample()
-        elif sampling_type == 'solid_angle':
-            zero = torch.tensor([0.0], device=device, dtype=dtype)
-            twopi = torch.tensor([2*math.pi], device=device, dtype=dtype)
-            rad = torch.tensor([cone_angle], device=device, dtype=dtype)
-            F_phi_max = SolidAngleSample.CDF_phi(rad)
-            self._solid_angle = SolidAngleSample(zero, F_phi_max, zero, twopi)
-        else:
-            raise ValueError(f"Unknown sampling_type: {sampling_type}")
+        self.emission = emission
 
     def sample_dir(self, N: int) -> torch.Tensor:
-        if self.sampling_type == 'lambertian':
-            return self._lambertian.sample(N, device=self.device, dtype=self.dtype)
-        elif self.sampling_type == 'solid_angle':
-            phi, theta = self._solid_angle.sample(N)
-            dz = torch.cos(phi)
-            dr = torch.sin(phi)
-            dx, dy = torch.cos(theta)*dr, torch.sin(theta)*dr
-            # Move to device and ensure correct dtype
-            res = torch.stack([dx, dy, dz], dim=1)
-            return res.to(device=self.device, dtype=self.dtype)
+        return self.emission.sample_dir(N, device=self.device, dtype=self.dtype)
 
 
 class RectangularPanel(PanelSource):
@@ -92,9 +100,8 @@ class RectangularPanel(PanelSource):
                  device: Union[str, torch.device] = 'cpu',
                  dtype: torch.dtype = torch.float32,
                  transform: Optional[Union[RayTransformBundle, None]] = None,
-                 sampling_type: str = 'lambertian',
-                 cone_angle: float = math.pi / 4.0):
-        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform, sampling_type=sampling_type, cone_angle=cone_angle)
+                 emission: EmissionModel = LambertianEmission()):
+        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform, emission=emission)
         w2, h2 = width / 2.0, height / 2.0
         self._x_dist = Uniform(
             torch.tensor(-w2, dtype=dtype),
@@ -131,13 +138,12 @@ class RingSource(PanelSource):
                  device: Union[str, torch.device] = 'cpu',
                  dtype: torch.dtype = torch.float32,
                  transform: Optional[Union[RayTransformBundle, None]] = None,
-                 sampling_type: str = 'lambertian',
-                 cone_angle: float = math.pi / 4.0):
+                 emission: EmissionModel = LambertianEmission()):
         if radius_inner > radius_outer:
             raise ValueError(
                 f"radius_inner ({radius_inner}) must be <= radius_outer ({radius_outer})"
             )
-        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform, sampling_type=sampling_type, cone_angle=cone_angle)
+        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform, emission=emission)
         zero   = torch.tensor([0.0],                 dtype=dtype)
         twopi  = torch.tensor([2.0 * torch.pi],      dtype=dtype)
         r_in2  = torch.tensor([radius_inner ** 2],   dtype=dtype)
