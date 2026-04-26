@@ -54,7 +54,12 @@ def _get_optical_z_list(elem):
 # Constraint modules
 # ---------------------------------------------------------------------------
 
-class ThicknessConstraint(nn.Module):
+class Constraint(nn.Module):
+    """Base class for optimization constraints."""
+    pass
+
+
+class ThicknessConstraint(Constraint):
     """
     Log-barrier inequality constraint on the axial distance between consecutive
     optical surfaces within each element.
@@ -101,7 +106,7 @@ class ThicknessConstraint(nn.Module):
         return self.weight * sum(terms)
 
 
-class SpacingConstraint(nn.Module):
+class SpacingConstraint(Constraint):
     """
     Log-barrier inequality constraint on the axial gap between adjacent elements.
 
@@ -135,7 +140,7 @@ class SpacingConstraint(nn.Module):
         return self.weight * sum(terms)
 
 
-class SystemLengthConstraint(nn.Module):
+class SystemLengthConstraint(Constraint):
     """
     Log-barrier inequality constraint on total system length.
 

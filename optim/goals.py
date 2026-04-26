@@ -8,7 +8,12 @@ from ..rays.bundle import Bundle
 from ..elements import Sensor
 
 
-class FocalLengthLoss(nn.Module):
+class Goal(nn.Module):
+    """Base class for optimization goals."""
+    pass
+
+
+class FocalLengthLoss(Goal):
     """
     MSE loss on paraxial system power (P = 1/f) relative to a target.
 
@@ -34,7 +39,7 @@ class FocalLengthLoss(nn.Module):
         return (P_actual - self.P_target) ** 2
 
 
-class SpotTargetLoss(nn.Module):
+class SpotTargetLoss(Goal):
     """
     Weighted Euclidean distance between each bundle's intensity centroid and a
     fixed target position on the sensor plane.
@@ -91,7 +96,7 @@ class SpotTargetLoss(nn.Module):
         return torch.stack(losses).mean()
 
 
-class SpotSizeLoss(nn.Module):
+class SpotSizeLoss(Goal):
     """
     Mean intensity-weighted RMS spot radius across a set of field bundles.
 

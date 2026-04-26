@@ -7,7 +7,7 @@ from ..geom import RayTransform
 from .parent import Element
 from ..phys import Reflect
 from ..geom import Quadric, QuadricZY, RayTransform
-from ..geom.bounded import HalfSphere, HalfCyl
+from ..geom.bounded import HalfSphere, HalfCyl, BoundedHalfSphere
 from .ideal import ParaxialMirrorMat
 
 
@@ -21,13 +21,13 @@ class Mirror(Element):
 
 class SphericalMirror(Mirror):
 
-    def __init__(self, c1: float, d: float,
-                 c1_grad: bool = False, d_grad: bool = False,
+    def __init__(self, c1: float, d: float, diameter: float = float('inf'),
+                 c1_grad: bool = False, d_grad: bool = False, diameter_grad: bool = False,
                  transform: Optional[Union[RayTransform, None]] = None):
 
         super().__init__()
 
-        self.shape = HalfSphere(curvature=c1, curvature_grad=c1_grad, transform=transform)
+        self.shape = BoundedHalfSphere(curvature=c1, diameter=diameter, curvature_grad=c1_grad, diameter_grad=diameter_grad, transform=transform)
         self.d = nn.Parameter(torch.as_tensor(d), requires_grad=d_grad)
 
     @property

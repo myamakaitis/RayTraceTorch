@@ -1,2 +1,2 @@
-from .goals import FocalLengthLoss, SpotSizeLoss
-from .constraints import ThicknessConstraint, SpacingConstraint, SystemLengthConstraint
+from .goals import Goal, FocalLengthLoss, SpotSizeLoss, SpotTargetLoss
+from .constraints import Constraint, ThicknessConstraint, SpacingConstraint, SystemLengthConstraint

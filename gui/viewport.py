@@ -48,6 +48,19 @@ class RenderViewport:
 
         # Ray path history: list of [N, 3] CPU float tensors (one per sim step)
         self.ray_path_history: list = []
+        self.ray_ids: np.ndarray = np.array([])
+        
+        # Color palette for ray IDs
+        self._palette = [
+            (255, 220, 60),    # yellow
+            (60, 200, 255),    # light blue
+            (255, 100, 100),   # red/pink
+            (100, 255, 100),   # green
+            (200, 100, 255),   # purple
+            (255, 150, 50),    # orange
+            (50, 255, 200),    # cyan
+            (255, 255, 255),   # white
+        ]
 
         # Ray overlay display settings
         self.ray_visible: bool = True
@@ -143,7 +156,6 @@ class RenderViewport:
         """
         cam   = self._camera
         w, h  = self._w, self._h
-        color = (255, 220, 60, int(self.ray_opacity))
         thick = float(self.ray_linewidth)
 
         # --- 1. Compute desired line specs (no DPG calls yet) ---
@@ -154,6 +166,10 @@ class RenderViewport:
             stride = max(1, n_rays // 100)
 
             for ri in range(0, n_rays, stride):
+                ray_id = int(self.ray_ids[ri]) if len(self.ray_ids) > ri else 0
+                base_color = self._palette[ray_id % len(self._palette)]
+                color = (*base_color, int(self.ray_opacity))
+                
                 prev_sc = None
                 for snap in self.ray_path_history:
                     sc, visible = self._project_point(snap[ri], cam, w, h)

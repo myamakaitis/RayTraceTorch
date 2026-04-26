@@ -46,12 +46,19 @@ class RayTransform(nn.Module):
             self.rot_vec.register_hook(lambda grad: grad * self.rot_mask)
 
     def _compute_matrix(self):
+        if hasattr(self, '_cached_rot') and self._cached_rot is not None and not self.rot_vec.requires_grad:
+            return self._cached_rot
+
         x, y, z = self.rot_vec
         K = torch.zeros((3, 3), device=self.rot_vec.device, dtype=self.rot_vec.dtype)
         K[0, 1], K[0, 2] = -z, y
         K[1, 0], K[1, 2] = z, -x
         K[2, 0], K[2, 1] = -y, x
-        return torch.linalg.matrix_exp(K)
+        rot = torch.linalg.matrix_exp(K)
+        
+        if not self.rot_vec.requires_grad:
+            self._cached_rot = rot
+        return rot
 
     @property
     def rot(self):
@@ -160,7 +167,19 @@ class RayTransformNoisy(RayTransform):
 
         self.trans_dist = Normal(self.zero, self.trans_scale)
         self.rot_dist = Normal(self.zero, self.rot_scale)
+        
+        self.is_frozen = False
 
+    def freeze_noise(self, N):
+        """Generates and locks the noise parameters for a batch of N rays."""
+        self.cached_trans_noise, self.cached_rot_noise = self.addNoise(N)
+        self.is_frozen = True
+        
+    def unfreeze_noise(self):
+        """Unlocks the noise parameters, allowing them to be regenerated."""
+        self.is_frozen = False
+        self.cached_trans_noise = torch.tensor([])
+        self.cached_rot_noise = torch.tensor([])
 
     def _compute_matrix_batch(self, rot_vec_batch):
 
@@ -174,24 +193,30 @@ class RayTransformNoisy(RayTransform):
         return torch.linalg.matrix_exp(K)
 
     def addNoise(self, N):
-
-        trans_noise = self.trans[:, None] + self.trans_dist.sample(N)
-        rot_noise = self.rot_vec[:, None] + self.rot_dist.sample(N)
+        # Transpose to [N, 3] instead of [3, N, 3]
+        trans_noise = self.trans[None, :] + self.trans_dist.sample((N,))
+        rot_noise = self.rot_vec[None, :] + self.rot_dist.sample((N,))
 
         return trans_noise, rot_noise
 
     def transform_(self, _pos, _dir):
 
-        trans_noise, rot_noise = self.addNoise(_pos.size(0))
+        batch_size = _pos.size(0)
+        if self.is_frozen and self.cached_trans_noise.size(0) == batch_size:
+            trans_noise, rot_noise = self.cached_trans_noise, self.cached_rot_noise
+        else:
+            trans_noise, rot_noise = self.addNoise(batch_size)
+            
         rot = self._compute_matrix_batch(rot_noise)
 
         shifted_pos = _pos - trans_noise
 
-        local_pos = torch.bmm(shifted_pos, rot)
-        local_dir = torch.bmm(_dir, rot)
+        local_pos = torch.bmm(shifted_pos.unsqueeze(1), rot).squeeze(1)
+        local_dir = torch.bmm(_dir.unsqueeze(1), rot).squeeze(1)
 
-        self.cached_trans_noise = torch.tensor([])
-        self.cached_rot_noise = torch.tensor([])
+        if not self.is_frozen:
+            self.cached_trans_noise = torch.tensor([])
+            self.cached_rot_noise = torch.tensor([])
 
         return local_pos, local_dir
 
@@ -200,15 +225,17 @@ class RayTransformNoisy(RayTransform):
         batch_size = _pos.size(0)
 
         with torch.no_grad():
-            if self.cached_trans_noise.size(0) == batch_size:
+            if self.is_frozen and self.cached_trans_noise.size(0) == batch_size:
+                trans_noise, rot_noise = self.cached_trans_noise, self.cached_rot_noise
+            elif self.cached_trans_noise.size(0) == batch_size:
                 trans_noise, rot_noise = self.cached_trans_noise, self.cached_rot_noise
             else:
                 trans_noise, rot_noise = self.addNoise(batch_size)
 
         rot = self._compute_matrix_batch(rot_noise)
 
-        unshifted_pos = torch.bmm(_pos, rot.transpose(1, 2))
-        global_dir = torch.bmm(_dir, rot.transpose(1, 2))
+        unshifted_pos = torch.bmm(_pos.unsqueeze(1), rot.transpose(1, 2)).squeeze(1)
+        global_dir = torch.bmm(_dir.unsqueeze(1), rot.transpose(1, 2)).squeeze(1)
 
         global_pos = unshifted_pos + trans_noise
 

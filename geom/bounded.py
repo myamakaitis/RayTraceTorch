@@ -139,6 +139,26 @@ class HalfSphere(Quadric, SurfaceBounded):
         return sag + self.transform.trans[2]
 
 
+class BoundedHalfSphere(HalfSphere):
+    """
+    A Sphere clipped to a hemisphere, and further bounded by a circular aperture diameter.
+    """
+
+    def __init__(self, curvature: float, diameter: float, curvature_grad:bool=False, diameter_grad:bool=False, transform: Optional[Union[RayTransform, None]]=None):
+        super().__init__(curvature=curvature, curvature_grad=curvature_grad, transform=transform)
+        self.diameter = nn.Parameter(torch.as_tensor(diameter), requires_grad=diameter_grad)
+
+    def inBounds(self, local_pos):
+        # Check hemisphere bounds
+        hemisphere_bounds = super().inBounds(local_pos)
+        
+        # Check diameter bounds: x^2 + y^2 <= (D/2)^2
+        xy_sq = local_pos[:, 0] ** 2 + local_pos[:, 1] ** 2
+        aperture_bounds = xy_sq <= (self.diameter / 2.0) ** 2
+        
+        return hemisphere_bounds & aperture_bounds
+
+
 class HalfCyl(QuadricZY, SurfaceBounded):
     """
     A Cylindrical surface clipped to the valid hemisphere (relative to curvature).

@@ -329,6 +329,7 @@ def _run_simulation():
     # Hand the recorded history to the viewport for overlay drawing
     if paths is not None:
         _viewport.ray_path_history = paths.get_history()
+        _viewport.ray_ids = paths.unwrap().id.cpu().numpy()
     _refresh_all_views()
     _update_results_panel()
 
@@ -494,8 +495,10 @@ def _update_results_panel():
             dpg.bind_colormap("spot_plot", dpg.mvPlotColormap_Hot)
         except Exception:
             pass
-        dpg.set_axis_limits("spot_xax", xmin, xmax)
-        dpg.set_axis_limits("spot_yax", ymin, ymax)
+        dpg.set_axis_limits_auto("spot_xax")
+        dpg.set_axis_limits_auto("spot_yax")
+        dpg.fit_axis_data("spot_xax")
+        dpg.fit_axis_data("spot_yax")
 
     # ---- Metrics ----
     safe_w = np.where(w > 0, w, 1e-12)
@@ -657,6 +660,7 @@ def _on_ray_vis_changed():
 def _clear_ray_overlay():
     """Erase the stored ray path history and remove all overlay lines."""
     _viewport.ray_path_history = []
+    _viewport.ray_ids = np.array([])
     _viewport.redraw_overlay()
 
 

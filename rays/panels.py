@@ -2,8 +2,9 @@ import torch
 from torch.distributions import Uniform
 from typing import Optional, Union
 
+import math
 from ..geom import RayTransformBundle
-from .bundle import DiskSample, Bundle
+from .bundle import DiskSample, Bundle, SolidAngleSample
 
 
 class LambertianSample:
@@ -42,12 +43,35 @@ class PanelSource(Bundle):
     def __init__(self, ray_id: int,
                  device: Union[str, torch.device] = 'cpu',
                  dtype: torch.dtype = torch.float32,
-                 transform: Optional[Union[RayTransformBundle, None]] = None):
+                 transform: Optional[Union[RayTransformBundle, None]] = None,
+                 sampling_type: str = 'lambertian',
+                 cone_angle: float = math.pi / 4.0):
         super().__init__(transform=transform, ray_id=ray_id, device=device, dtype=dtype)
-        self._lambertian = LambertianSample()
+        
+        self.sampling_type = sampling_type
+        
+        if sampling_type == 'lambertian':
+            self._lambertian = LambertianSample()
+        elif sampling_type == 'solid_angle':
+            zero = torch.tensor([0.0], device=device, dtype=dtype)
+            twopi = torch.tensor([2*math.pi], device=device, dtype=dtype)
+            rad = torch.tensor([cone_angle], device=device, dtype=dtype)
+            F_phi_max = SolidAngleSample.CDF_phi(rad)
+            self._solid_angle = SolidAngleSample(zero, F_phi_max, zero, twopi)
+        else:
+            raise ValueError(f"Unknown sampling_type: {sampling_type}")
 
     def sample_dir(self, N: int) -> torch.Tensor:
-        return self._lambertian.sample(N, device=self.device, dtype=self.dtype)
+        if self.sampling_type == 'lambertian':
+            return self._lambertian.sample(N, device=self.device, dtype=self.dtype)
+        elif self.sampling_type == 'solid_angle':
+            phi, theta = self._solid_angle.sample(N)
+            dz = torch.cos(phi)
+            dr = torch.sin(phi)
+            dx, dy = torch.cos(theta)*dr, torch.sin(theta)*dr
+            # Move to device and ensure correct dtype
+            res = torch.stack([dx, dy, dz], dim=1)
+            return res.to(device=self.device, dtype=self.dtype)
 
 
 class RectangularPanel(PanelSource):
@@ -67,8 +91,10 @@ class RectangularPanel(PanelSource):
                  ray_id: int,
                  device: Union[str, torch.device] = 'cpu',
                  dtype: torch.dtype = torch.float32,
-                 transform: Optional[Union[RayTransformBundle, None]] = None):
-        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform)
+                 transform: Optional[Union[RayTransformBundle, None]] = None,
+                 sampling_type: str = 'lambertian',
+                 cone_angle: float = math.pi / 4.0):
+        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform, sampling_type=sampling_type, cone_angle=cone_angle)
         w2, h2 = width / 2.0, height / 2.0
         self._x_dist = Uniform(
             torch.tensor(-w2, dtype=dtype),
@@ -104,12 +130,14 @@ class RingSource(PanelSource):
                  ray_id: int,
                  device: Union[str, torch.device] = 'cpu',
                  dtype: torch.dtype = torch.float32,
-                 transform: Optional[Union[RayTransformBundle, None]] = None):
+                 transform: Optional[Union[RayTransformBundle, None]] = None,
+                 sampling_type: str = 'lambertian',
+                 cone_angle: float = math.pi / 4.0):
         if radius_inner > radius_outer:
             raise ValueError(
                 f"radius_inner ({radius_inner}) must be <= radius_outer ({radius_outer})"
             )
-        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform)
+        super().__init__(ray_id=ray_id, device=device, dtype=dtype, transform=transform, sampling_type=sampling_type, cone_angle=cone_angle)
         zero   = torch.tensor([0.0],                 dtype=dtype)
         twopi  = torch.tensor([2.0 * torch.pi],      dtype=dtype)
         r_in2  = torch.tensor([radius_inner ** 2],   dtype=dtype)
